@@ -1,50 +1,41 @@
-# Kiến trúc (khung tổng quát)
+# Kiến trúc
 
-> ⚠️ Bản khung — các quyết định cụ thể (hình thức sản phẩm, stack, model) đang chờ thảo luận, xem `open-questions.md`. File này sẽ được cập nhật sau khi chốt.
+> **Bản chính thức nằm ở `plan.md`** (đã chốt sau research 09/2026). File này giữ sơ đồ tổng quan + dẫn chi tiết.
 
-## Luồng dữ liệu tổng quát
+## Sơ đồ tổng quan
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                            PHÍA NGƯỜI DÙNG                          │
-│                                                                     │
-│  [Nền tảng video bất kỳ]                                            │
-│        │                                                            │
-│        ▼                                                            │
-│  [Capture]  ── chunk audio ──►  [Display/Overlay phụ đề]            │
-│                                   ▲                                 │
-└───────────────────────────────────┼─────────────────────────────────┘
-                                    │ WebSocket / HTTP
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                              BACKEND                                │
-│                                                                     │
-│  [ASR service]  ── transcript ──►  [Translate service]              │
-│   (faster-whisper /                   │                             │
-│    API free-tier...)                  ▼                             │
-│                              [Glossary + thuật ngữ]                 │
-│                               - giữ nguyên code/lệnh                │
-│                               - dịch nhất quán thuật ngữ chuyên ngành│
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────── Chrome Extension (MV3) ────────────────────────────┐
+│                                                                                │
+│  [Popup] bật/tắt, ngôn ngữ, trạng thái + metric (TSR, lag)                     │
+│     │                                                                          │
+│  [Service worker] điều phối: tabCapture streamId, token/quota queue, phiên     │
+│     │                                                                          │
+│  [Offscreen document]                                                          │
+│     ├─ getUserMedia(tab) → <audio> loopback (vẫn nghe tab)                     │
+│     ├─ AudioWorklet → PCM 16kHz mono → chunker 45s                             │
+│     ├─ ASR: gemini-3.5-transcribe (verbatim + word timestamps                  │
+│     │        + custom vocabulary từ glossary)                                  │
+│     ├─ Segmenter: subtitle units ≤ 2 dòng × 42 ký tự                           │
+│     ├─ Dịch batch 3–5 unit: gemini-3.5-flash                                   │
+│     │    [mask ⟦n⟧] → [glossary chọn lọc + context 3–5 câu] → [JSON out]       │
+│     ├─ Validator: placeholder roundtrip + TSR → retry 1 lần → splice ⚠        │
+│     └─ Subtitle queue (theo mốc thời gian audio)                               │
+│     │                                                                          │
+│  [Content script] overlay phụ đề song ngữ                                      │
+│  [Options] key/mode, ngôn ngữ, chunk, glossary editor, export .srt             │
+│                                                                                │
+│  Provider: ① DirectGemini (fetch thẳng, key user)                              │
+│            ② LocalGateway (http://localhost, key trong .env — tuỳ chọn)        │
+└────────────────────────────────────────────────────────────────────────────────┘
 ```
-
-## Các thành phần
-
-| Thành phần | Trách nhiệm | Trạng thái |
-|------------|-------------|------------|
-| **Capture** | Bắt luồng âm thanh video/audio đang phát, cắt thành chunk nhỏ gửi backend | Chưa quyết định cách bắt (extension/app) |
-| **ASR service** | Chunk audio → text (kèm timestamp) | Chưa chọn model: local (faster-whisper...) hay API free-tier |
-| **Translate service** | Text → ngôn ngữ đích, qua lớp glossary | Chưa chọn: LLM (giữ thuật ngữ tốt) hay model dịch truyền thống hay hybrid |
-| **Glossary** | Từ điển thuật ngữ + quy tắc giữ nguyên văn code/lệnh; người dùng chỉnh được | Ý tưởng cốt lõi của dự án, cần thiết kế kỹ |
-| **Display** | Overlay phụ đề lên nội dung đang xem | Phụ thuộc hình thức sản phẩm |
 
 ## Nguyên tắc thiết kế
 
-1. **Pipeline tách bạch**: Capture → ASR → Translate → Display nối với nhau qua interface rõ ràng, mỗi mắt xích có thể thay thế (đổi model ASR không phải sửa Display).
-2. **Glossary là tầng riêng biệt** — glossary nằm độc lập với pipeline, dùng chung cho cả dịch live và dịch PDF/paper về sau.
-3. **Provider-agnostic**: ASR và Translate là interface với nhiều provider (local/API), người dùng chọn theo cấu hình.
-4. **Protocol rõ ràng giữa frontend ↔ backend**: định nghĩa schema message (chunk meta, transcript, translation) ngay từ đầu để test contract được.
+1. **Pipeline tách mắt xích**: capture / ASR / segment / dịch / validate / hiển thị là module độc lập, đổi được.
+2. **Provider abstraction**: mọi lời gọi AI qua 1 interface — Direct hoặc Gateway, cắm thêm sau này không sửa kiến trúc.
+3. **Glossary là tầng riêng**, dữ liệu người dùng (không hardcode), dùng chung cho ASR + dịch (+ PDF sau này).
+4. **Validate local trước khi tốn thêm call**: placeholder roundtrip + TSR chạy miễn phí phía client; retry có hạn ngạch.
+5. **Hiển thị tiến triển**: batch xong là hiện, không đợi chunk.
 
-## Việc cần quyết định trước khi scaffold code
-
-Xem `open-questions.md`.
+Chi tiết đầy đủ (bằng chứng research, pipeline từng bước, ngân sách token, API key policy, milestone, risk): **`plan.md`**.

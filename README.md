@@ -10,24 +10,25 @@ Dịch live âm thanh/video sang ngôn ngữ của người dùng, với tiêu c
 
 ## Định hướng sản phẩm
 
-Bắt được luồng âm thanh của video/audio đang phát (trên bất kỳ nền tảng nào), chuyển thành text (ASR), dịch sang ngôn ngữ người dùng, hiển thị như phụ đề live. Về sau mở rộng sang dịch PDF/paper: giữ luồng đọc, hình ảnh gốc, template, và các thuật ngữ học thuật để thuận tiện cho nghiên cứu.
+Chrome extension bắt luồng âm thanh tab video bất kỳ (YouTube, Coursera, Udemy...), nhận diện giọng nói bằng **Gemini 3.5 Transcribe**, dịch bằng **Gemini 3.5 Flash** kèm **glossary bảo toàn thuật ngữ học thuật** (`npm run start`, `useEffect`... không bị bóp méo), hiển thị phụ đề song ngữ live. Chi phí người dùng cuối ≈ 0 (free tier Gemini + key cá nhân). Về sau mở rộng sang PDF/paper (hiện đã hoãn).
 
-> Kiến trúc và lựa chọn công nghệ đang trong quá trình thảo luận — xem `docs/open-questions.md`.
+> Kiến trúc & kế hoạch chi tiết đã chốt: [`docs/plan.md`](docs/plan.md) — được tinh chỉnh từ research papers học thuật + docs chính thức của Google + khảo sát các extension thực tế.
 
 ## Cấu trúc repo
 
 ```
 Live-Trans/
-├── docs/          # Tài liệu: tầm nhìn, yêu cầu, kiến trúc, roadmap, các câu hỏi mở
-├── frontend/      # Phía người dùng (extension/app) — chưa scaffold, chờ quyết định kiến trúc
-├── backend/       # Backend riêng (ASR, dịch, glossary) — chưa scaffold, chờ quyết định kiến trúc
-├── tests/         # Bài test tích hợp + fixtures (sample audio/video/pdf)
-├── scripts/       # Script hỗ trợ dev: setup, dev, build, check
+├── docs/          # plan.md (nguồn sự thật), open-questions, architecture, roadmap...
+├── frontend/      # → sẽ rename thành extension/ ở M0 (WXT + TypeScript + Preact)
+├── backend/       # Placeholder — chỉ mở khi làm PDF (đã hoãn)
+├── tests/         # e2e + fixtures (video mẫu, golden transcript, golden glossary)
+├── scripts/       # dev, build-zip (side-load), check
 └── README.md
 ```
 
-## Trạng thái hiện tại
+## Trạng thái
 
-- ✅ Giai đoạn 0: init cấu trúc dự án + tài liệu nền
-- ⏳ Tiếp theo: thảo luận chốt kiến trúc (extension/app, backend stack, mô hình ASR/dịch) → xem `docs/open-questions.md`
-- 📅 Lộ trình đầy đủ: `docs/roadmap.md`
+- ✅ Giai đoạn 0: init repo + docs
+- ✅ Chốt kiến trúc sau research (xem `docs/plan.md` §1 — bằng chứng kèm link papers/docs)
+- ⏳ Tiếp theo: **M0 scaffold extension** (WXT + TS + CI) → M1 capture → transcript
+- 📅 Lộ trình: `docs/roadmap.md`

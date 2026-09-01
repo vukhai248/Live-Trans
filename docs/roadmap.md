@@ -1,42 +1,34 @@
 # Lộ trình
 
-> Thứ tự giai đoạn là định hướng ban đầu, sẽ điều chỉnh sau buổi thảo luận kiến trúc.
+> Đồng bộ với `plan.md` §9 — mỗi milestone có tiêu chí nghiệm thu.
 
-## Giai đoạn 0 — Init dự án ✅
+## M0 — Scaffold ✅ (đang làm)
+Cấu trúc repo + docs (đã xong) → WXT + TS + lint + CI; rename `frontend/` → `extension/`.
 
-- Cấu trúc repo: `docs/`, `frontend/`, `backend/`, `tests/`, `scripts/`
-- Tài liệu nền: overview, requirements, architecture (khung), roadmap, open-questions
-- Git repo khởi tạo
+## M1 — Capture → transcript tiếng gốc (1–2 tuần)
+PCM capture + loopback, chunk 45s, ASR word timestamps, overlay phụ đề tiếng gốc tiến triển, RMS silence detect.
+✅ 30 phút video: phụ đề đúng, không trôi mốc, tab vẫn có tiếng, tab DRM bị phát hiện.
 
-## Giai đoạn 1 — MVP dịch live
+## M2 — Dịch + glossary v1 (1–2 tuần)
+Pipeline dịch 5 bước (mask → dịch → validate TSR → retry → splice/restore), overlay song ngữ, Options + glossary editor.
+✅ Fixture video kỹ thuật: TSR ≥ 95%, placeholder roundtrip 100%.
 
-Mục tiêu: xem một video YouTube tiếng Anh và thấy phụ đề tiếng Việt live, chấp nhận độ trễ vài giây.
+## M3 — Độ bền (1 tuần)
+Gateway mode + auto-detect, token queue, retry/backoff, export .srt/.txt, pause/resume, chặn đa tab.
+✅ 1 giờ liên tục không lỗi; mất mạng tự phục hồi.
 
-- Chốt kiến trúc & stack (xem `open-questions.md`)
-- Scaffold frontend + backend thật, chạy được end-to-end với provider "dummy" (echo)
-- Thay provider dummy bằng ASR + dịch thật (ưu tiên local/free-tier)
-- Test contract giữa frontend ↔ backend
+## M4 — Live mode (spike, tuỳ chọn)
+`gemini-3.5-transcribe-live`, PCM 100ms, xoay session (resumption 2h, GoAway), interim text.
+✅ Trễ < 5s (90% dòng); xoay session không mất câu.
 
-## Giai đoạn 2 — Giữ thuật ngữ học thuật
+## M5 — Đóng gói & phát hành nội bộ (0.5–1 ngày)
+Zip side-load, README cài đặt tiếng Việt, privacy note, hướng dẫn góp glossary.
+✅ Người không kỹ thuật cài được chỉ theo README.
 
-Mục tiêu: dịch video kỹ thuật không bóp méo thuật ngữ/code — đây là "benchmark" chất lượng của dự án.
+---
 
-- Thiết kế glossary: định dạng, cách nạp, nguồn mặc định
-- Cơ chế giữ nguyên văn code/lệnh trong kết quả dịch
-- Bộ test so sánh chất lượng: sample video + transcript kỳ vọng
-- UI cho người dùng chỉnh glossary
+## Đã dịch chuyển ra ngoài lộ trình
 
-## Giai đoạn 3 — Dịch PDF/paper
-
-Mục tiêu: dịch tài liệu nghiên cứu giữ hình ảnh, layout, thuật ngữ.
-
-- Parse PDF (text, ảnh, bảng, layout)
-- Dịch giữ template + xuất bản đọc được
-- Dùng chung glossary với Giai đoạn 2
-
-## Giai đoạn 4 — Hoàn thiện
-
-- Đa ngôn ngữ ASR/dịch (mở rộng cặp ngôn ngữ)
-- Tối ưu độ trễ, xử lý nói nhanh/chất lượng audio kém
-- Đóng gói phân phối (store hoặc side-load), tài liệu cài đặt cho người dùng cuối
-- Tùy chọn: dịch text trên trang web (không chỉ audio)
+- **PDF/paper** (trước đây là Giai đoạn 3): **hoãn** — xem triển vọng `plan.md` §10 (BabelDOC là ứng viên khi mở lại).
+- **Chrome Web Store**: quyết định sau M5.
+- **Captions fast-path**: đánh giá sau M3 (xem `open-questions.md`).

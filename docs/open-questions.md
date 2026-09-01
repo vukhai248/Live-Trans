@@ -1,66 +1,36 @@
-# Các câu hỏi mở — cần chốt trước khi scaffold code
+# Các câu hỏi mở / đã chốt
 
-> Danh sách này là đầu vào cho buổi thảo luận kiến trúc. Mỗi mục ghi rõ các phương án và đánh giá ban đầu (chưa phải quyết định).
+> Cập nhật 2026-09-02 sau vòng research papers + docs chính thức. Kiến trúc chi tiết: `plan.md`.
 
-## 1. Hình thức sản phẩm (phía người dùng)
+## Đã chốt ✅
 
-| Phương án | Ưu | Nhược |
-|-----------|----|----|
-| **A. Chrome/Edge extension (MV3)** | `tabCapture`/`offscreen` bắt được audio mọi tab video (YouTube, Coursera...); overlay phụ đề ngay trên trang; cài nhẹ, không cần app rời | Bị giới hạn API của từng trình duyệt; publish store cần duyệt |
-| **B. Desktop app (Electron/Tauri)** | Bắt được âm thanh toàn hệ thống (loopback), kể cả app ngoài trình duyệt | Nặng, build đa nền tảng phức tạp, khó overlay lên video, khó phân phối |
-| **C. Extension + Web app** | Extension cho live; web app cho upload file audio/PDF (phục vụ Giai đoạn 3) | Phạm vi rộng hơn, phải maintain 2 mặt tiền |
+| Câu hỏi | Quyết định | Ghi chú |
+|---|---|---|
+| Hình thức sản phẩm | Chrome Extension MV3 | Chrome/Edge; side-load trước, CWS sau |
+| Backend | Không bắt buộc — 2 mode Direct (gọi thẳng) / Local Gateway (script local giữ key) | plan.md §2 |
+| Backend stack (nếu mở) | Node thuần không dependency cho gateway; Python chỉ dành cho phase PDF | |
+| ASR | Chunked 45s, `gemini-3.5-transcribe` (Interactions API), verbatim + word timestamps + custom vocabulary | plan.md §3 |
+| Live streaming | Là M4 (spike), `gemini-3.5-transcribe-live` + sessionResumption | |
+| Dịch thuật | `gemini-3.5-flash`, batch 3–5 unit, placeholder mask + glossary chọn lọc + validate TSR + retry/splice | plan.md §4 |
+| Chiến lược giữ thuật ngữ | Pipeline 5 bước dựa trên WMT'23/'25, ParseJargon, TEaR | plan.md §1.5, §4 |
+| Tooling | npm (WXT/Vite), TypeScript strict | |
+| Fallback quota | Không làm — token queue + batching đủ (audio 25 token/s) | |
+| Phân phối | Side-load zip (Developer Mode) | |
+| PDF/paper | **Hoãn** — chỉ mục triển vọng | plan.md §10 |
+| Ngôn ngữ | ASR auto-detect (85+); dịch target mặc định Việt (config) | |
 
-**Đánh giá ban đầu:** A là ứng viên chính cho MVP (bắt audio theo tab là đúng bài toán), C là đích đến khi vào Giai đoạn 3.
+## Đang mở ⏳ (không chặn MVP)
 
-## 2. Backend stack
+1. **Captions fast-path**: video có sẵn phụ đề EN (YouTube/Coursera) → bỏ ASR chỉ dịch. Tiết kiệm quota lớn, nhưng cần đánh giá ToS từng nền tảng và độ bền DOM/track API. — Đánh giá sau M3.
+2. **Gateway hay Direct làm mặc định khi phát hành rộng**: Direct tiện hơn cho sinh viên; Gateway an toàn hơn theo policy Google. Quyết lại ở M5.
+3. **Chunk size mặc định**: 45s theo research độ trễ; cần số liệu thực tế (lag p50/p95 từ M1) để tinh chỉnh, có thể theo dõiadaptive.
+4. **Overlap biên chunk**: mặc định không overlap (dựa word timestamps); chỉ bật overlap 2s + strip nếu benchmark M1 đo mất từ ở biên.
+5. **Cấu trúc glossary mẫu**: bộ "kỹ thuật phần mềm" ~50–100 term sẽ biên soạn ở M2 — nguồn lấy đâu (tự viết vs thu thập từ cộng đồng).
+6. **Chrome Web Store**: tiêu chí "đủ ổn" để lên store (số người dùng side-load? độ ổn định?) — quyết ở M5.
 
-| Phương án | Ưu | Nhược |
-|-----------|----|----|
-| **A. Python + FastAPI** | Hệ sinh thái AI/ASR mạnh nhất: faster-whisper, WhisperX, Argos Translate, NLLB đều Python; WebSocket streaming tốt | Team phải làm 2 ngôn ngữ (TS + Python) |
-| **B. Node.js + TypeScript** | Đồng nhất ngôn ngữ với frontend | Lựa chọn model ASR/dịch local hạn chế, chủ yếu gọi API ngoài |
+## Đã loại ❌ (có lý do)
 
-**Đánh giá ban đầu:** A phù hợp định hướng "local model, chi phí ~0".
-
-## 3. Tooling quản lý package
-
-- `npm + uv` (mặc định có sẵn, hiện đại cho Python)
-- `pnpm + uv` (tiết kiệm disk cho monorepo, cần cài thêm)
-- `npm + pip/venv` (truyền thống, không cài thêm gì)
-
-## 4. ASR (speech-to-text)
-
-| Phương án | Ưu | Nhược |
-|-----------|----|----|
-| **Local: faster-whisper / WhisperX** | Miễn phí, riêng tư, chạy offline; cần GPU/CPU khá | Máy yếu sẽ chậm; phải tải model |
-| **API free-tier (Groq, Gemini...)** | Không cần máy mạnh, nhanh | Giới hạn quota; audio phải rời máy |
-
-**Đánh giá ban đầu:** kiến trúc phải là provider-agnostic, mặc định local, API làm phương án dự phòng.
-
-## 5. Dịch thuật (translate)
-
-| Phương án | Ưu | Nhược |
-|-----------|----|----|
-| **LLM (Gemini free-tier, model mở...)** | Giữ thuật ngữ tốt nhất nhờ prompt + glossary; xử lý ngữ cảnh | Quota; chất lượng phụ thuộc model |
-| **Model dịch truyền thống (Argos, NLLB)** | Miễn phí hoàn toàn, chạy local, nhanh | Khó kiểm soát việc giữ thuật ngữ |
-| **Hybrid** | LLM cho bản dịch chính, truyền thống làm fallback | Phức tạp hơn |
-
-## 6. Chiến lược giữ thuật ngữ (benchmark chất lượng dự án)
-
-Đây không chỉ là chuyện "model tốt hay không" — cần thiết kế chủ động:
-
-- Glossary bắt buộc: thuật ngữ + code/lệnh được đánh dấu "giữ nguyên văn" trước khi dịch
-- Prompt/instruction cho LLM: liệt kê token không được dịch
-- Post-processing: đối chiếu kết quả với glossary, cảnh báo khi bị dịch
-- Câu hỏi: glossary mặc định nạp từ đâu (tự xây hay dùng nguồn có sẵn)?
-
-## 7. Vận hành & phân phối
-
-- Backend chạy đâu: máy người dùng (self-host, đúng tinh thần miễn phí) hay server chung?
-- Phân phối extension: Chrome Web Store (cần fee đăng ký dev) hay side-load (.zip) cho nhóm nhỏ trước?
-- Quyền riêng tư: âm thanh rời máy chỉ khi người dùng bật provider API — hiển thị rõ trong settings.
-
-## 8. Mở khác
-
-- ASR tự detect ngôn ngữ hay người dùng chọn sẵn?
-- Có cần dịch chiều ngược (Việt → Anh)?
-- Có làm dịch text trên trang web (không phải audio) không?
+- **Desktop app (Electron/Tauri)**: nặng, khó overlay, không đúng bài toán (user chốt extension).
+- **Whisper fallback local khi hết quota**: user xác nhận quota đủ dùng; không tăng phạm vi MVP.
+- **API key rotation "router"**: chỉ là phương án phòng bị, không làm.
+- **Web app frontend riêng**: bỏ khi kiến trúc thuần extension được chốt.

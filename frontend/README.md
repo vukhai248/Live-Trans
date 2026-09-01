@@ -1,26 +1,34 @@
-# frontend
+# frontend (→ sẽ rename thành `extension/` ở M0)
 
-Phía người dùng của Live-Trans: bắt luồng âm thanh video/audio đang phát, gửi backend, hiển thị phụ đề dịch.
+Code Chrome Extension (MV3) của Live-Trans.
 
-> ⚠️ **Chưa scaffold** — đang chờ chốt kiến trúc, xem `docs/open-questions.md` (mục 1).
+> Kiến trúc chi tiết & bằng chứng research: [`docs/plan.md`](../docs/plan.md). Stack đã chốt: **WXT + TypeScript strict + Preact/nanostores**.
 
-## Ứng viên kỹ thuật (đánh giá ban đầu)
-
-**Chrome/Edge extension (Manifest V3)** là ứng viên chính cho MVP:
-
-- `chrome.tabCapture` + offscreen document: bắt được luồng âm thanh của tab video đang phát (YouTube, Coursera, Udemy...) mà không phụ thuộc từng trang web.
-- Content script: overlay phụ đề bám theo video ngay trên trang.
-- Popup: bật/tắt dịch, chọn cặp ngôn ngữ; Options: cấu hình backend, glossary.
-- Framework dựng extension (chưa chọn): WXT (Vite-based) hoặc @crxjs — quyết định khi scaffold.
-
-## Vai trò các phần (dự kiến khi scaffold)
+## Thành phần (theo plan §2, §8)
 
 ```
-frontend/
-├── background/    # Service worker: điều phối capture ↔ backend
-├── offscreen/     # Bắt audio (tabCapture/MediaRecorder) + kết nối backend
-├── content/       # Overlay phụ đề trên trang
-├── popup/         # UI bật/tắt, chọn ngôn ngữ
-├── options/       # Cấu hình: địa chỉ backend, cặp ngôn ngữ, glossary
-└── shared/        # Kiểu dữ liệu giao thức frontend ↔ backend
+extension/
+├── entrypoints/
+│   ├── background/    # Service worker: điều phối, token/quota queue (không giữ DOM API)
+│   ├── offscreen/     # getUserMedia(tab) + <audio> loopback + AudioWorklet PCM 16kHz
+│   │                  # + ASR/Translate client + segmenter + validator + subtitle queue
+│   ├── content/       # Overlay phụ đề song ngữ
+│   ├── popup/         # Bật/tắt, ngôn ngữ, trạng thái + metric (TSR, lag)
+│   └── options/       # API key/mode, chunk size, glossary editor, export
+├── lib/
+│   ├── providers/     # Provider interface: DirectGemini | LocalGateway
+│   ├── asr/           # gemini-3.5-transcribe client + parser (tách module)
+│   ├── translate/     # batcher + prompt builder + JSON parser (gemini-3.5-flash)
+│   ├── glossary/      # store + selector ≤25 term + TSR validator
+│   ├── masker/        # placeholder ⟦n⟧ + restorer
+│   ├── subtitles/     # segmenter 2×42 ký tự + CPS 17 + srt export
+│   └── protocol/      # message types giữa các entrypoint
+└── tests/             # Vitest
 ```
+
+## Quy tắc kỹ thuật bắt buộc (plan §5)
+
+- fetch thuần + **native endpoints** (không JS SDK — 403 trong browser; không OpenAI-compat — CORS)
+- Model ID tập trung trong config (API đang public preview)
+- API key chỉ từ `chrome.storage.local` (user nhập), không bao giờ nhúng trong code
+- MediaRecorder/webm bị cấm cho live pipeline — capture bằng AudioWorklet PCM
