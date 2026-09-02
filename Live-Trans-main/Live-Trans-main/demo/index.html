@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live-Trans · Demo tĩnh</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="demo-shell">
+      <!-- ===== Demo header ===== -->
+      <header class="demo-top">
+        <div class="demo-brand">
+          <span class="demo-logo">LT</span>
+          <div>
+            <h1>Live-Trans <span class="demo-tag">Demo tĩnh</span></h1>
+            <p>Xem trước giao diện thật (HTML/CSS/JS thuần) · không cần cài extension · không gọi API</p>
+          </div>
+        </div>
+      </header>
+
+      <!-- ===== Top-level tabs ===== -->
+      <nav class="demo-tabs" role="tablist" aria-label="Demo views">
+        <button class="demo-tab active" data-tab="popup" role="tab">Popup</button>
+        <button class="demo-tab" data-tab="options" role="tab">Cài đặt</button>
+        <button class="demo-tab" data-tab="video" role="tab">Video demo</button>
+      </nav>
+
+      <main class="demo-stage">
+        <!-- ============ POPUP ============ -->
+        <section class="demo-panel" data-panel="popup" id="panel-popup">
+          <div class="popup-window">
+            <div class="popup-chrome"><i></i><i></i><i></i></div>
+            <div class="lt-popup">
+              <div class="app">
+                <header>
+                  <div class="brand">
+                    <span class="logo">LT</span>
+                    <div>
+                      <h1>Live-Trans</h1>
+                      <p>Dịch live · giữ thuật ngữ</p>
+                    </div>
+                  </div>
+                  <span class="dot" id="popup-dot"></span>
+                </header>
+
+                <button class="primary" id="popup-toggle">Dịch tab này</button>
+
+                <section class="metrics">
+                  <div class="metric"><b id="m-tsr">100%</b><span>TSR</span></div>
+                  <div class="metric"><b id="m-units">0</b><span>phụ đề</span></div>
+                  <div class="metric"><b id="m-calls">0</b><span>lời gọi</span></div>
+                  <div class="metric"><b id="m-splices">0</b><span>chèn ⚠</span></div>
+                </section>
+
+                <section class="rows">
+                  <label class="row">
+                    <span>Ngôn ngữ đích</span>
+                    <select id="popup-lang">
+                      <option value="vi">Tiếng Việt</option>
+                      <option value="en">English</option>
+                      <option value="ja">日本語</option>
+                      <option value="ko">한국어</option>
+                      <option value="zh">中文</option>
+                      <option value="fr">Français</option>
+                      <option value="de">Deutsch</option>
+                      <option value="es">Español</option>
+                    </select>
+                  </label>
+                  <label class="row">
+                    <span>Hiện bản gốc</span>
+                    <input type="checkbox" id="popup-orig" checked />
+                  </label>
+                  <label class="row">
+                    <span>Dịch tiêu đề video</span>
+                    <input type="checkbox" id="popup-title" checked />
+                  </label>
+                </section>
+
+                <footer>
+                  <button class="link" id="popup-open-options">Cài đặt (key, mode, glossary)</button>
+                </footer>
+              </div>
+            </div>
+          </div>
+          <p class="demo-caption">Popup — cửa sổ khi bấm icon extension (340px). Bấm nút lớn để bật/tắt &amp; xem chấm trạng thái đập.</p>
+        </section>
+
+        <!-- ============ OPTIONS ============ -->
+        <section class="demo-panel" data-panel="options" id="panel-options" hidden>
+          <div class="browser-window">
+            <div class="browser-chrome">
+              <span class="bc-dots"><i></i><i></i><i></i></span>
+              <span class="bc-url"><code>chrome-extension://live-trans/options.html</code></span>
+            </div>
+            <div class="lt-options">
+              <div class="wrap">
+                <header>
+                  <div class="brand">
+                    <span class="logo">LT</span>
+                    <div>
+                      <h1>Cài đặt Live-Trans</h1>
+                      <p>Key, chế độ và glossary bảo toàn thuật ngữ</p>
+                    </div>
+                  </div>
+                  <button class="primary" id="opt-save">Lưu cài đặt</button>
+                </header>
+
+                <nav class="opt-nav">
+                  <button class="active" data-opttab="general">Chung</button>
+                  <button data-opttab="glossary">Glossary</button>
+                </nav>
+
+                <!-- General pane -->
+                <section class="card opt-pane" data-pane="general">
+                  <h2>Chế độ API</h2>
+                  <div class="modes">
+                    <button class="mode active" data-mode="demo"><b>Demo</b><span>Chạy thử không cần key</span></button>
+                    <button class="mode" data-mode="direct"><b>Direct</b><span>Gọi Gemini trực tiếp bằng key của bạn</span></button>
+                    <button class="mode" data-mode="gateway"><b>Gateway</b><span>Proxy local giữ key (an toàn hơn)</span></button>
+                  </div>
+
+                  <div class="mode-extra" data-mode-extra="direct" hidden>
+                    <label class="field">
+                      <span class="label">Gemini API key</span>
+                      <input type="password" value="" placeholder="AIza..." autocomplete="off" spellcheck="false" />
+                    </label>
+                  </div>
+                  <div class="mode-extra" data-mode-extra="gateway" hidden>
+                    <label class="field">
+                      <span class="label">Gateway URL</span>
+                      <input type="text" value="" placeholder="http://localhost:8787" />
+                    </label>
+                  </div>
+
+                  <h2>Ngôn ngữ &amp; hiển thị</h2>
+                  <div class="grid-2">
+                    <label class="field">
+                      <span class="label">Ngôn ngữ đích</span>
+                      <input type="text" value="vi" placeholder="vi" />
+                    </label>
+                    <label class="field">
+                      <span class="label">Ngôn ngữ nguồn (auto để tự nhận)</span>
+                      <input type="text" value="auto" placeholder="auto" />
+                    </label>
+                  </div>
+
+                  <div class="grid-2">
+                    <label class="field">
+                      <span class="label" id="chunk-label">Độ dài chunk ASR: 45s</span>
+                      <input type="range" min="30" max="180" step="5" value="45" id="chunk-range" />
+                    </label>
+                    <label class="field">
+                      <span class="label">Cỡ chữ phụ đề</span>
+                      <select id="opt-font">
+                        <option value="small">Nhỏ</option>
+                        <option value="medium" selected>Vừa</option>
+                        <option value="large">Lớn</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <label class="checkbox"><input type="checkbox" checked /><span>Hiện bản gốc dưới bản dịch</span></label>
+                  <label class="checkbox"><input type="checkbox" checked /><span>Dịch tiêu đề video (hiển thị trên video)</span></label>
+                </section>
+
+                <!-- Glossary pane -->
+                <section class="card opt-pane" data-pane="glossary" hidden>
+                  <div class="glossary-head">
+                    <h2>Glossary (<span id="g-count">0</span> thuật ngữ)</h2>
+                    <div class="actions">
+                      <button class="ghost" id="g-starter">Nạp bộ mẫu</button>
+                      <button class="ghost" id="g-export">Xuất JSON</button>
+                      <label class="ghost file">Nhập JSON<input type="file" accept="application/json" id="g-import" /></label>
+                    </div>
+                  </div>
+
+                  <div class="add-row">
+                    <input class="g-term" placeholder="Thuật ngữ (vd: npm run start)" id="g-term" />
+                    <select id="g-type">
+                      <option value="command">command</option>
+                      <option value="code">code</option>
+                      <option value="jargon">jargon</option>
+                      <option value="acronym">acronym</option>
+                    </select>
+                    <input class="g-vi" placeholder="Dịch (jargon/acronym)" id="g-vi" />
+                    <button class="primary small" id="g-add">Thêm</button>
+                  </div>
+
+                  <table>
+                    <thead>
+                      <tr><th>Thuật ngữ</th><th>Loại</th><th>Dịch</th><th></th></tr>
+                    </thead>
+                    <tbody id="g-body">
+                      <tr><td colspan="4" class="empty">Chưa có thuật ngữ. Thêm hoặc &ldquo;Nạp bộ mẫu&rdquo;.</td></tr>
+                    </tbody>
+                  </table>
+                </section>
+
+                <p class="hint">
+                  ⚠️ Free tier: dữ liệu âm thanh/văn bản có thể được Google dùng để cải thiện sản phẩm.
+                  Key được lưu <b>chỉ trên máy bạn</b> (chrome.storage.local), không bao giờ nhúng vào code.
+                </p>
+              </div>
+            </div>
+          </div>
+          <p class="demo-caption">Options — trang cài đặt (chế độ API, key, ngôn ngữ, glossary). Trường key chỉ là placeholder, không bao giờ chứa key thật.</p>
+        </section>
+
+        <!-- ============ MOCK VIDEO ============ -->
+        <section class="demo-panel" data-panel="video" id="panel-video" hidden>
+          <div class="browser-window">
+            <div class="browser-chrome">
+              <span class="bc-dots"><i></i><i></i><i></i></span>
+              <span class="bc-url"><code>https://lecture.example.com/ml-fundamentals</code></span>
+            </div>
+            <div class="lt-video">
+              <div class="video-frame">
+                <div class="video-center"><div class="play">▶</div></div>
+                <div class="video-live">● LIVE</div>
+                <div class="video-progress"><i></i></div>
+
+                <!-- translated title pill (top) -->
+                <div class="lt-title">
+                  <span class="lt-original">Machine Learning Fundamentals</span>
+                  <span class="lt-translated">Nền tảng học máy</span>
+                </div>
+
+                <!-- bilingual subtitle pill (bottom) -->
+                <div class="lt-sub" id="lt-sub">
+                  <span class="lt-translated" id="sub-vi">Nhấn &ldquo;Chạy demo&rdquo; để xem phụ đề</span>
+                  <span class="lt-original" id="sub-en">Press &ldquo;Chạy demo&rdquo; to start subtitles</span>
+                </div>
+              </div>
+
+              <div class="video-controls">
+                <button class="primary" id="video-run">Chạy demo</button>
+                <span class="video-hint">Phụ đề mô phỏng · dịch sang tiếng Việt, giữ thuật ngữ &amp; gắn badge ⚠</span>
+              </div>
+            </div>
+          </div>
+          <p class="demo-caption">Overlay trên video — tiêu đề đã dịch (trên) + phụ đề song ngữ (dưới) xoay vòng 4 câu, badge ⚠ thuật ngữ xuất hiện ở các câu chứa thuật ngữ.</p>
+        </section>
+      </main>
+
+      <footer class="demo-foot">
+        Demo tĩnh mô phỏng giao diện thật trong <code>extension/</code> · không gửi dữ liệu · không cần API key · mở trực tiếp bằng trình duyệt.
+      </footer>
+    </div>
+
+    <script src="demo.js"></script>
+  </body>
+</html>
