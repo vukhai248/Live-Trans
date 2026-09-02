@@ -19,6 +19,9 @@ venv/
 .env.*
 !.env.example
 
+# Test browser (Chromium for Testing profile)
+.tools/
+
 # Extension packaging
 *.crx
 *.pem

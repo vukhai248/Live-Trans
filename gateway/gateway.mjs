@@ -13,7 +13,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 
 const PORT = Number(process.env.PORT ?? 8787);
-const FLASH_MODEL = 'gemini-3.7-flash';
+const FLASH_MODEL = 'gemini-3.5-flash';
 const TRANSCRIBE_MODEL = 'gemini-3.5-transcribe';
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -79,12 +79,14 @@ const server = createServer(async (req, res) => {
     const body = await readJson(req);
 
     if (req.url === '/transcribe' && req.method === 'POST') {
-      const fileUri = await uploadAudio(body.pcmBase64 ?? '', key);
+      // Inline base64 audio thẳng vào Interactions API (đã xác minh 2026-09-02:
+      // 200 OK + word timestamps ở steps[].content[].annotations[]) — không cần
+      // Files upload, không vướng CORS.
       const data = await gemini(
         `interactions`,
         {
           model: TRANSCRIBE_MODEL,
-          input: [{ type: 'audio', uri: fileUri, mime_type: 'audio/wav' }],
+          input: [{ type: 'audio', data: body.pcmBase64 ? pcmToWavBase64(body.pcmBase64) : '', mime_type: 'audio/wav' }],
           generation_config: {
             transcription_config: {
               language_codes: body.language === 'auto' ? [] : [body.language ?? ''],
@@ -133,16 +135,12 @@ server.listen(PORT, () => {
 
 function shapeTranscript(data) {
   const words = [];
-  const lists = [
-    data?.words,
-    data?.result?.words,
-    data?.audio_transcription?.words,
-    ...(data?.annotations ?? []).map((a) => a?.words),
-    ...(data?.result?.annotations ?? []).map((a) => a?.words),
-  ];
-  for (const list of lists) {
-    if (!Array.isArray(list)) continue;
-    for (const w of list) {
+  // Shape đã xác minh thật (2026-09-02): steps[].content[].annotations[] là
+  // word_info { text, start_offset: "0.100s", end_offset: "0.600s" }.
+  const stepContents = (data?.steps ?? []).flatMap((s) => (Array.isArray(s?.content) ? s.content : []));
+  for (const c of stepContents) {
+    if (!Array.isArray(c?.annotations)) continue;
+    for (const w of c.annotations) {
       const text = w?.word ?? w?.text ?? '';
       if (!text) continue;
       const s = parseOffset(w?.start_offset, w?.startMs, w?.start);
@@ -152,7 +150,30 @@ function shapeTranscript(data) {
     }
     if (words.length) break;
   }
-  const text = data?.output_text ?? data?.result?.output_text ?? data?.text ?? '';
+  if (words.length === 0) {
+    const lists = [
+      data?.words,
+      data?.result?.words,
+      data?.audio_transcription?.words,
+      ...(data?.annotations ?? []).map((a) => a?.words),
+      ...(data?.result?.annotations ?? []).map((a) => a?.words),
+    ];
+    for (const list of lists) {
+      if (!Array.isArray(list)) continue;
+      for (const w of list) {
+        const text = w?.word ?? w?.text ?? '';
+        if (!text) continue;
+        const s = parseOffset(w?.start_offset, w?.startMs, w?.start);
+        const e = parseOffset(w?.end_offset, w?.endMs, w?.end);
+        if (s === undefined || e === undefined) continue;
+        words.push({ text, startMs: s, endMs: e });
+      }
+      if (words.length) break;
+    }
+  }
+  const stepText = stepContents.map((c) => c?.text ?? '').find((t) => t && t.trim());
+  const text =
+    data?.output_text ?? data?.result?.output_text ?? stepText ?? data?.text ?? '';
   return { id: `gw-${Date.now().toString(36)}`, text, words, language: data?.language_code };
 }
 
@@ -174,24 +195,10 @@ function parseOffset(...values) {
   return undefined;
 }
 
-async function uploadAudio(pcmBase64, key) {
-  const wav = pcmToWav(Buffer.from(pcmBase64, 'base64'));
-  const res = await fetch(`${BASE}/upload/v1beta/files`, {
-    method: 'POST',
-    headers: {
-      'x-goog-api-key': key,
-      'X-Goog-Upload-Protocol': 'raw',
-      'X-Goog-Upload-Command': 'start, upload, finalize',
-      'X-Goog-Upload-Header-Content-Length': String(wav.length),
-      'X-Goog-Upload-Header-Content-Type': 'audio/wav',
-      'Content-Type': 'audio/wav',
-    },
-    body: wav,
-  });
-  if (!res.ok) throw new Error(`Files upload ${res.status}: ${await res.text()}`);
-  const json = await res.json();
-  if (!json?.file?.uri) throw new Error('Files upload: no file.uri');
-  return json.file.uri;
+/** PCM base64 → WAV base64 (thêm 44-byte header) để gửi inline vào Interactions API. */
+function pcmToWavBase64(pcmBase64, sampleRate = 16000, channels = 1, bits = 16) {
+  const wav = pcmToWav(Buffer.from(pcmBase64, 'base64'), sampleRate, channels, bits);
+  return wav.toString('base64');
 }
 
 function pcmToWav(pcm, sampleRate = 16000, channels = 1, bits = 16) {

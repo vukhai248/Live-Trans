@@ -5,10 +5,13 @@ import type { Transcript, Word } from './types';
  * its own module because the endpoint is still in public preview (plan §5) and
  * its response shape may drift. Only this file needs updating if it does.
  *
- * Verified live (2026-09-02): the transcript text is in `interaction.output_text`;
- * word-level timestamps come back as `start_offset`/`end_offset` duration strings
- * (e.g. "0.100s") on word objects under a `words`/`annotations` list. We accept
- * several field spellings and units to stay resilient.
+ * Verified live (2026-09-02, inline base64 audio + verbatim + word timestamps):
+ * the transcript text lives at `steps[].content[].text` and word timestamps at
+ * `steps[].content[].annotations[]`, each entry:
+ *   { "type": "word_info", "text": "Welcome", "start_index": 0, "end_index": 7,
+ *     "start_offset": "0.100s", "end_offset": "0.600s" }
+ * We also accept several older/alternate field spellings and units to stay
+ * resilient to preview drift.
  */
 
 const WORD_LISTS = [
@@ -21,7 +24,7 @@ const WORD_LISTS = [
 ];
 
 export function parseTranscribeResult(data: any): Transcript {
-  const rawText: string = firstString(
+  let rawText: string = firstString(
     data?.output_text,
     data?.transcript,
     data?.result?.output_text,
@@ -47,6 +50,24 @@ export function parseTranscribeResult(data: any): Transcript {
       }
     }
     if (words.length > 0) break; // first non-empty list wins
+  }
+
+  // Shape đã xác minh thật (2026-09-02): steps[].content[] với annotations[]
+  // word_info trực tiếp trên từng content item.
+  const steps = Array.isArray(data?.steps) ? data.steps : [];
+  if (steps.length > 0) {
+    const contents = steps.flatMap((s: any) => (Array.isArray(s?.content) ? s.content : []));
+    if (!rawText) {
+      const stepText = contents.map((c: any) => c?.text ?? '').find((t: string) => t.trim());
+      if (stepText) rawText = stepText.trim();
+    }
+    if (words.length === 0) {
+      for (const c of contents) {
+        if (Array.isArray(c?.annotations)) {
+          for (const a of c.annotations) pushWord(words, a);
+        }
+      }
+    }
   }
 
   // Fallback: text without word timestamps → synthesize evenly.

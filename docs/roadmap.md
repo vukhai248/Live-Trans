@@ -1,5 +1,7 @@
 # Lộ trình
 
+> ⚠️ **Cập nhật 2026-09-03**: video path (M1–M4) **tạm hoãn** — pipeline đã chạy được end-to-end thật nhưng dính quota `gemini-3.5-transcribe` free tier (25 RPM) + còn 2 vấn đề mở. **Ưu tiên mới: dịch PDF/paper giữ layout** (Giai đoạn 3 được kéo lên), dịch bằng `gemini-3.5-flash-lite`. Chi tiết đầy đủ: `HANDOFF.md`.
+>
 > Đồng bộ với `plan.md` §9 — mỗi milestone có tiêu chí nghiệm thu.
 
 ## M0 — Scaffold ✅ (đang làm)

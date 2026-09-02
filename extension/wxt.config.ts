@@ -19,6 +19,12 @@ export default defineConfig({
       page: 'options/index.html',
       open_in_tab: true,
     },
+    commands: {
+      _execute_action: {
+        suggested_key: { default: 'Ctrl+Shift+U' },
+        description: 'Mở/tắt popup Live-Trans',
+      },
+    },
     icons: {
       16: 'icons/16.png',
       32: 'icons/32.png',

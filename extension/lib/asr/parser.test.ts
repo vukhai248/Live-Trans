@@ -107,3 +107,65 @@ describe('parseTranscribeResult', () => {
     expect(r.language).toBe('es-ES');
   });
 });
+
+describe('parseTranscribeResult — steps shape (verified live 2026-09-02)', () => {
+  // Shape thật trả về từ /v1beta/interactions với inline base64 audio +
+  // transcription_config verbatim + timestamp_granularities: ['word'].
+  const LIVE_SHAPE = {
+    id: 'v1_xxx',
+    status: 'completed',
+    usage: { total_tokens: 398 },
+    steps: [
+      {
+        type: 'model_output',
+        content: [
+          {
+            type: 'text',
+            text: 'Welcome to LiveTrans. Run npm run start.',
+            annotations: [
+              {
+                type: 'word_info',
+                text: 'Welcome',
+                start_index: 0,
+                end_index: 7,
+                start_offset: '0.100s',
+                end_offset: '0.600s',
+              },
+              {
+                type: 'word_info',
+                text: 'to',
+                start_index: 8,
+                end_index: 10,
+                start_offset: '0.600s',
+                end_offset: '0.800s',
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    object: 'interaction',
+    model: 'gemini-3.5-transcribe',
+  };
+
+  test('extracts transcript text from steps[].content[].text', () => {
+    const r = parseTranscribeResult(LIVE_SHAPE);
+    expect(r.text).toBe('Welcome to LiveTrans. Run npm run start.');
+  });
+
+  test('extracts word timestamps from steps[].content[].annotations[]', () => {
+    const r = parseTranscribeResult(LIVE_SHAPE);
+    expect(r.words).toHaveLength(2);
+    expect(r.words[0]).toEqual({ text: 'Welcome', startMs: 100, endMs: 600 });
+    expect(r.words[1]).toEqual({ text: 'to', startMs: 600, endMs: 800 });
+  });
+
+  test('falls back to steps text synthesis when annotations are absent', () => {
+    const r = parseTranscribeResult({
+      steps: [{ type: 'model_output', content: [{ type: 'text', text: 'one two three' }] }],
+    });
+    expect(r.text).toBe('one two three');
+    expect(r.words).toHaveLength(3);
+    expect(r.words[0]).toEqual({ text: 'one', startMs: 0, endMs: 400 });
+  });
+});

@@ -37,15 +37,6 @@ export default defineBackground(() => {
     }
   }
 
-  async function closeOffscreen(): Promise<void> {
-    try {
-      await browser.offscreen.closeDocument();
-    } catch {
-      /* already closed */
-    }
-    offscreenReady = false;
-  }
-
   async function handleStart(msg: Extract<RuntimeMessage, { type: 'START_SESSION' }>) {
     // Multi-tab guard: only one tab may be translated at a time. If a session
     // is already capturing/starting, stop it before starting the new one so we
@@ -105,7 +96,11 @@ export default defineBackground(() => {
     } catch {
       /* offscreen may already be gone */
     }
-    await closeOffscreen();
+    // KHÔNG đóng offscreen document ở đây: subtitle store nằm trong memory của
+    // offscreen — giữ nó sống để user export được .srt/.txt sau khi dừng (I3).
+    // Document sẽ được tái sử dụng cho phiên kế tiếp (ensureOffscreen kiểm tra
+    // trước khi tạo) và tự đóng khi extension unload.
+    offscreenReady = true;
     state = { ...INITIAL_STATE, status: 'idle' };
   }
 
@@ -145,6 +140,10 @@ export default defineBackground(() => {
             break;
           case 'OFFSCREEN_READY':
             offscreenReady = true;
+            break;
+          case 'FORWARD_TO_TAB':
+            // Offscreen không có chrome.tabs — worker forward hộ tới content script.
+            browser.tabs.sendMessage(message.tabId, message.message).catch(() => {});
             break;
           case 'STATE_UPDATE':
             state = { ...state, ...message.state };

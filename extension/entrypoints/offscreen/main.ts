@@ -37,7 +37,11 @@ function getSubtitleSnapshot(): SubtitleUnit[] {
 
 function sendToTab(message: RuntimeMessage): void {
   if (activeTabId === undefined) return;
-  browser.tabs.sendMessage(activeTabId, message).catch(() => {});
+  // Offscreen document KHÔNG có chrome.tabs (MV3 chỉ cấp API hạn chế) —
+  // forward qua service worker, worker sẽ dùng tabs.sendMessage tới tab.
+  void chrome.runtime
+    .sendMessage({ type: 'FORWARD_TO_TAB', tabId: activeTabId, message })
+    .catch(() => {});
 }
 
 function reportState(): void {

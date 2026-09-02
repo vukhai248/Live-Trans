@@ -235,6 +235,11 @@ header p {
   border-color: rgba(245, 158, 11, 0.25);
 }
 
+.media-card.media-loading {
+  opacity: 0.65;
+  border-style: dashed;
+}
+
 .media-icon {
   font-size: 18px;
   line-height: 1;
@@ -334,6 +339,11 @@ header p {
   border-radius: 50%;
   background: var(--ok);
   animation: pulse 1.5s infinite;
+}
+
+.live-progress-text {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .error-box {

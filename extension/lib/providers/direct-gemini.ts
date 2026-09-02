@@ -8,14 +8,13 @@ import type {
   TranslatedUnit,
 } from './provider';
 import { parseTranscribeResult } from '../asr/parser';
-import { pcmBase64ToWavBytes, pcmBase64ToWavBase64 } from '../capture/wav';
+import { pcmBase64ToWavBase64 } from '../capture/wav';
 import { buildTranslatePrompt, parseTranslateBatch } from '../translate/prompt';
 import { fetchWithRetry } from './fetch-retry';
 
 const TRANSCRIBE_MODEL = 'gemini-3.5-transcribe';
 const FLASH_MODEL = 'gemini-3.5-flash';
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
-const UPLOAD_BASE = 'https://generativelanguage.googleapis.com/upload/v1beta';
 
 async function jsonFetch(url: string, init: RequestInit): Promise<any> {
   const res = await fetchWithRetry(url, init);
@@ -43,7 +42,7 @@ export async function testGeminiApiKey(apiKey: string): Promise<{ ok: boolean; m
     return { ok: false, model: '', error: 'Chưa nhập Gemini API Key' };
   }
 
-  const candidateModels = ['gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+  const candidateModels = ['gemini-3.5-flash'];
   let lastError = '';
 
   for (const model of candidateModels) {
@@ -82,66 +81,15 @@ export class DirectGeminiProvider implements Provider {
     req: TranscribeRequest,
     settings: Settings,
   ): Promise<ReturnType<typeof parseTranscribeResult>> {
+    // gemini-3.5-transcribe qua Interactions API, audio INLINE base64 (đã xác
+    // minh thật 2026-09-02: 200 OK, có word timestamps ở steps[].content[].annotations[],
+    // KHÔNG cần Files upload → không vướng CORS upload). Verbatim + word
+    // timestamps là bắt buộc để phụ đề khớp mốc thời gian (plan §3, M1 acceptance).
     const wavBase64 = pcmBase64ToWavBase64(req.pcmBase64);
-
-    // Primary path: Direct Gemini Flash multimodal audio transcription with inline base64
-    // (Extremely fast, reliable, zero CORS upload issues, supported by all standard Gemini keys)
-    try {
-      const url = `${BASE}/models/${FLASH_MODEL}:generateContent`;
-      const prompt = `Transcribe the speech in this audio clip verbatim into text. Output only the exact transcribed speech text. Do not add explanations or commentary.`;
-      const body = {
-        contents: [
-          {
-            parts: [
-              {
-                inline_data: {
-                  mime_type: 'audio/wav',
-                  data: wavBase64,
-                },
-              },
-              { text: prompt },
-            ],
-          },
-        ],
-        generation_config: {
-          temperature: 0.1,
-        },
-      };
-
-      const data = await jsonFetch(url, {
-        method: 'POST',
-        headers: { 'x-goog-api-key': settings.apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-      if (text.trim()) {
-        return parseTranscribeResult({ output_text: text.trim() });
-      }
-    } catch (flashErr) {
-      console.warn('Direct inline transcribe attempt failed, trying Interactions API...', flashErr);
-    }
-
-    // Fallback path: Interactions API with Files API upload
-    const wav = pcmBase64ToWavBytes(req.pcmBase64);
-    const fileUri = await jsonFetch(`${UPLOAD_BASE}/files`, {
-      method: 'POST',
-      headers: {
-        'x-goog-api-key': settings.apiKey,
-        'X-Goog-Upload-Protocol': 'raw',
-        'X-Goog-Upload-Command': 'start, upload, finalize',
-        'X-Goog-Upload-Header-Content-Length': String(wav.length),
-        'X-Goog-Upload-Header-Content-Type': 'audio/wav',
-        'Content-Type': 'audio/wav',
-      },
-      body: wav as unknown as BodyInit,
-    }).then((j) => j?.file?.uri as string | undefined);
-
-    if (!fileUri) throw new Error('Files API không trả về file.uri');
 
     const body: Record<string, any> = {
       model: TRANSCRIBE_MODEL,
-      input: [{ type: 'audio', uri: fileUri, mime_type: 'audio/wav' }],
+      input: [{ type: 'audio', data: wavBase64, mime_type: 'audio/wav' }],
       generation_config: {
         transcription_config: {
           language_codes: req.language === 'auto' ? [] : [req.language],

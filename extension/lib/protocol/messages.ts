@@ -45,7 +45,8 @@ export type RuntimeMessage =
       hasAudio: boolean;
       videoTitle?: string;
       mediaCount: number;
-    };
+    }
+  | { type: 'FORWARD_TO_TAB'; tabId: number; message: RuntimeMessage };
 
 export const INITIAL_STATE: SessionState = {
   status: 'idle',
