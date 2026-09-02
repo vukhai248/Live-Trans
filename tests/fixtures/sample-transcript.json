@@ -1,0 +1,33 @@
+{
+  "id": "sample-transcript-01",
+  "text": "Today we will learn how to run npm run start and configure the useEffect hook inside our component to avoid overfitting during training with gradient descent.",
+  "language": "en",
+  "words": [
+    { "text": "Today", "startMs": 0, "endMs": 400 },
+    { "text": "we", "startMs": 400, "endMs": 600 },
+    { "text": "will", "startMs": 600, "endMs": 800 },
+    { "text": "learn", "startMs": 800, "endMs": 1100 },
+    { "text": "how", "startMs": 1100, "endMs": 1300 },
+    { "text": "to", "startMs": 1300, "endMs": 1450 },
+    { "text": "run", "startMs": 1450, "endMs": 1700 },
+    { "text": "npm", "startMs": 1700, "endMs": 2000 },
+    { "text": "run", "startMs": 2000, "endMs": 2300 },
+    { "text": "start", "startMs": 2300, "endMs": 2700 },
+    { "text": "and", "startMs": 2700, "endMs": 2900 },
+    { "text": "configure", "startMs": 2900, "endMs": 3400 },
+    { "text": "the", "startMs": 3400, "endMs": 3600 },
+    { "text": "useEffect", "startMs": 3600, "endMs": 4200 },
+    { "text": "hook", "startMs": 4200, "endMs": 4500 },
+    { "text": "inside", "startMs": 4500, "endMs": 4800 },
+    { "text": "our", "startMs": 4800, "endMs": 5000 },
+    { "text": "component", "startMs": 5000, "endMs": 5600 },
+    { "text": "to", "startMs": 5600, "endMs": 5750 },
+    { "text": "avoid", "startMs": 5750, "endMs": 6100 },
+    { "text": "overfitting", "startMs": 6100, "endMs": 6700 },
+    { "text": "during", "startMs": 6700, "endMs": 7000 },
+    { "text": "training", "startMs": 7000, "endMs": 7500 },
+    { "text": "with", "startMs": 7500, "endMs": 7700 },
+    { "text": "gradient", "startMs": 7700, "endMs": 8100 },
+    { "text": "descent.", "startMs": 8100, "endMs": 8700 }
+  ]
+}

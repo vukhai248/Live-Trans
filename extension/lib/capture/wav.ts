@@ -4,6 +4,16 @@
  * container (WAV/MP3/FLAC...), so we prepend a 44-byte WAV header before upload.
  */
 
+export function pcmBase64ToWavBase64(pcmBase64: string): string {
+  const bytes = pcmBase64ToWavBytes(pcmBase64);
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
 export function pcmBase64ToWavBytes(
   pcmBase64: string,
   sampleRate = 16000,

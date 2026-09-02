@@ -37,7 +37,15 @@ export type RuntimeMessage =
   | { type: 'SUBTITLES'; units: SubtitleUnit[] }
   | { type: 'SUBTITLES_SNAPSHOT'; units: SubtitleUnit[] }
   | { type: 'TITLE_DETECTED'; title: string }
-  | { type: 'TRANSLATED_TITLE'; originalTitle: string; translatedTitle: string };
+  | { type: 'TRANSLATED_TITLE'; originalTitle: string; translatedTitle: string }
+  | { type: 'CHECK_MEDIA_PRESENCE' }
+  | {
+      type: 'MEDIA_PRESENCE_RESPONSE';
+      hasVideo: boolean;
+      hasAudio: boolean;
+      videoTitle?: string;
+      mediaCount: number;
+    };
 
 export const INITIAL_STATE: SessionState = {
   status: 'idle',

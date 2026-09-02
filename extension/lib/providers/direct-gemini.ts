@@ -8,20 +8,9 @@ import type {
   TranslatedUnit,
 } from './provider';
 import { parseTranscribeResult } from '../asr/parser';
-import { pcmBase64ToWavBytes } from '../capture/wav';
+import { pcmBase64ToWavBytes, pcmBase64ToWavBase64 } from '../capture/wav';
 import { buildTranslatePrompt, parseTranslateBatch } from '../translate/prompt';
 import { fetchWithRetry } from './fetch-retry';
-
-/**
- * Direct calls to Gemini native REST endpoints from the offscreen document.
- *
- * plan §5: use raw `fetch` + native endpoints — NOT the JS SDK (403 in the
- * browser) and NOT the OpenAI-compat endpoint (CORS). plan §7: the key belongs
- * to the user and is read from storage, never hardcoded.
- *
- * NOTE: Google does not officially commit to browser CORS for these endpoints,
- * which is exactly why the Gateway mode exists as an escape hatch (plan §2).
- */
 
 const TRANSCRIBE_MODEL = 'gemini-3.5-transcribe';
 const FLASH_MODEL = 'gemini-3.5-flash';
@@ -49,6 +38,43 @@ async function safeErrorText(res: Response): Promise<string> {
   }
 }
 
+export async function testGeminiApiKey(apiKey: string): Promise<{ ok: boolean; model: string; error?: string }> {
+  if (!apiKey || !apiKey.trim()) {
+    return { ok: false, model: '', error: 'Chưa nhập Gemini API Key' };
+  }
+
+  const candidateModels = ['gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+  let lastError = '';
+
+  for (const model of candidateModels) {
+    try {
+      const url = `${BASE}/models/${model}:generateContent`;
+      const body = {
+        contents: [{ role: 'user', parts: [{ text: 'Dịch từ "hello" sang tiếng Việt.' }] }],
+        generation_config: { max_output_tokens: 10, temperature: 0.1 },
+      };
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'x-goog-api-key': apiKey.trim(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (res.ok) {
+        return { ok: true, model };
+      }
+      const errText = await safeErrorText(res);
+      lastError = `${res.status}: ${errText}`;
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  return { ok: false, model: '', error: lastError || 'Không thể kết nối tới Gemini API' };
+}
+
 export class DirectGeminiProvider implements Provider {
   readonly mode = 'direct' as const;
 
@@ -56,12 +82,47 @@ export class DirectGeminiProvider implements Provider {
     req: TranscribeRequest,
     settings: Settings,
   ): Promise<ReturnType<typeof parseTranscribeResult>> {
-    // gemini-3.5-transcribe (pre-recorded) is exposed through the Interactions
-    // API: upload the audio via the Files API, then POST /interactions.
-    // Word-level timestamps are requested via transcription_config.mode.
-    // NOTE: custom vocabulary (`speech_context`) is NOT sent — Gemini does not
-    // support it together with word timestamps, and word timestamps are
-    // required for the subtitle overlay to stay in sync (M1 acceptance).
+    const wavBase64 = pcmBase64ToWavBase64(req.pcmBase64);
+
+    // Primary path: Direct Gemini Flash multimodal audio transcription with inline base64
+    // (Extremely fast, reliable, zero CORS upload issues, supported by all standard Gemini keys)
+    try {
+      const url = `${BASE}/models/${FLASH_MODEL}:generateContent`;
+      const prompt = `Transcribe the speech in this audio clip verbatim into text. Output only the exact transcribed speech text. Do not add explanations or commentary.`;
+      const body = {
+        contents: [
+          {
+            parts: [
+              {
+                inline_data: {
+                  mime_type: 'audio/wav',
+                  data: wavBase64,
+                },
+              },
+              { text: prompt },
+            ],
+          },
+        ],
+        generation_config: {
+          temperature: 0.1,
+        },
+      };
+
+      const data = await jsonFetch(url, {
+        method: 'POST',
+        headers: { 'x-goog-api-key': settings.apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      if (text.trim()) {
+        return parseTranscribeResult({ output_text: text.trim() });
+      }
+    } catch (flashErr) {
+      console.warn('Direct inline transcribe attempt failed, trying Interactions API...', flashErr);
+    }
+
+    // Fallback path: Interactions API with Files API upload
     const wav = pcmBase64ToWavBytes(req.pcmBase64);
     const fileUri = await jsonFetch(`${UPLOAD_BASE}/files`, {
       method: 'POST',

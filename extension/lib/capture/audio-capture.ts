@@ -38,11 +38,19 @@ export async function captureTabPcm(options: CaptureOptions): Promise<CaptureHan
   void audioEl.play().catch(() => {});
 
   const audioCtx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+  if (audioCtx.state === 'suspended') {
+    await audioCtx.resume();
+  }
+
   const source = audioCtx.createMediaStreamSource(stream);
   const processor = audioCtx.createScriptProcessor(4096, 1, 1);
 
-  const targetPerChunk = CHUNK_SAMPLES(options.chunkSeconds);
-  let buffer = new Int16Array(targetPerChunk);
+  // Emit first chunk early (10s) for instant user feedback, then full chunkSeconds
+  const firstChunkSeconds = Math.min(10, options.chunkSeconds);
+  let currentTargetSamples = CHUNK_SAMPLES(firstChunkSeconds);
+  let isFirstChunk = true;
+
+  let buffer = new Int16Array(currentTargetSamples);
   let filled = 0;
   let startedAt = 0;
   let lastRms = 0;
@@ -59,9 +67,14 @@ export async function captureTabPcm(options: CaptureOptions): Promise<CaptureHan
 
     for (let i = 0; i < input.length; i++) {
       if (filled >= buffer.length) {
-        const base64 = int16ToBase64(buffer);
-        options.onChunk(base64, startedAt, options.chunkSeconds * 1000);
-        buffer = new Int16Array(targetPerChunk);
+        const base64 = int16ToBase64(buffer.subarray(0, filled));
+        const durationSec = isFirstChunk ? firstChunkSeconds : options.chunkSeconds;
+        options.onChunk(base64, startedAt, durationSec * 1000);
+        if (isFirstChunk) {
+          isFirstChunk = false;
+          currentTargetSamples = CHUNK_SAMPLES(options.chunkSeconds);
+        }
+        buffer = new Int16Array(currentTargetSamples);
         filled = 0;
         startedAt = performance.now();
       }

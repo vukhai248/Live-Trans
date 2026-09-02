@@ -34,9 +34,22 @@ export default defineContentScript({
     const titleObserver = new MutationObserver(sendDetectedTitle);
     titleObserver.observe(document.documentElement, { subtree: true, childList: true });
 
-    browser.runtime.onMessage.addListener((message) => {
+    browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!message || typeof message !== 'object') return;
       switch ((message as { type: string }).type) {
+        case 'CHECK_MEDIA_PRESENCE': {
+          const videos = document.querySelectorAll('video');
+          const audios = document.querySelectorAll('audio');
+          const title = detectVideoTitle();
+          sendResponse({
+            type: 'MEDIA_PRESENCE_RESPONSE',
+            hasVideo: videos.length > 0,
+            hasAudio: audios.length > 0,
+            videoTitle: title,
+            mediaCount: videos.length + audios.length,
+          });
+          return true;
+        }
         case 'SUBTITLES':
           overlay.showSubtitles((message as { units: SubtitleUnit[] }).units, settings);
           break;

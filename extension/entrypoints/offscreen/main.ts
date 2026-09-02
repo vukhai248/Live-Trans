@@ -8,11 +8,14 @@ import { createProvider } from '@/lib/providers';
 import { loadSettings, type Settings } from '@/lib/settings';
 import { segment, type SubtitleUnit } from '@/lib/subtitles/segmenter';
 
+import { ConcurrencyQueue } from '@/lib/protocol/queue';
+
 let activeTabId: number | undefined;
 let capture: CaptureHandle | undefined;
 let sessionRunning = false;
 let sessionPaused = false;
 let sessionSettings: Settings | undefined;
+const liveTaskQueue = new ConcurrencyQueue(2);
 
 const sessionStats = { units: 0, tsr: 1, retries: 0, splices: 0, calls: 0 };
 
@@ -114,47 +117,75 @@ async function runLiveSession(streamId: string, settings: Settings): Promise<voi
   const asr = new AsrClient(provider, settings);
   const translator = new Translator(provider, settings);
 
-  const pending: Promise<void>[] = [];
   let chunkIndex = 0;
 
-  capture = await captureTabPcm({
-    streamId,
-    chunkSeconds: settings.chunkSeconds,
-    onChunk: (pcmBase64, startMs, durationMs) => {
-      if (sessionPaused) return; // paused: don't queue new work
-      const chunk: AudioChunk = {
-        id: `c${chunkIndex++}`,
-        pcmBase64,
-        startMs,
-        durationMs,
-      };
-      const task = (async () => {
-        try {
-          const transcript = await asr.transcribe(chunk, settings.glossary);
-          const units = segment(transcript.words);
-          const result = await translator.translateBatch(units, settings.glossary);
-          sessionStats.retries += result.stats.retries;
-          sessionStats.splices += result.stats.splices;
-          sessionStats.calls += result.stats.calls;
-          sessionStats.tsr = result.stats.tsr;
-          publishUnits(result.units);
-        } catch (err) {
-          sendToTab({ type: 'CAPTURE_ERROR', error: String(err) });
-        }
-      })();
-      pending.push(task);
-      // Keep at most 2 ASR + 2 translate calls in flight (plan §6).
-      if (pending.length > 4) pending.splice(0, pending.length - 4);
-    },
-    onSilence: () => {
-      sendToTab({
-        type: 'CAPTURE_ERROR',
-        error: 'Không nhận được âm thanh (tab im lặng hoặc DRM).',
-      });
-    },
-  });
-
-  await Promise.all(pending).catch(() => {});
+  try {
+    capture = await captureTabPcm({
+      streamId,
+      chunkSeconds: settings.chunkSeconds,
+      onChunk: (pcmBase64, startMs, durationMs) => {
+        if (sessionPaused || !sessionRunning) return;
+        const chunk: AudioChunk = {
+          id: `c${chunkIndex++}`,
+          pcmBase64,
+          startMs,
+          durationMs,
+        };
+        void liveTaskQueue.run(async () => {
+          if (!sessionRunning || sessionPaused) return;
+          try {
+            const transcript = await asr.transcribe(chunk, settings.glossary);
+            const units = segment(transcript.words);
+            const result = await translator.translateBatch(units, settings.glossary);
+            sessionStats.retries += result.stats.retries;
+            sessionStats.splices += result.stats.splices;
+            sessionStats.calls += result.stats.calls;
+            sessionStats.tsr = result.stats.tsr;
+            publishUnits(result.units);
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            sendToTab({ type: 'CAPTURE_ERROR', error: errMsg });
+            browser.runtime.sendMessage({
+              type: 'STATE_UPDATE',
+              state: {
+                status: 'error',
+                error: `Lỗi Gemini API: ${errMsg}`,
+                paused: false,
+                units: sessionStats.units,
+                tsr: sessionStats.tsr,
+                retries: sessionStats.retries,
+                splices: sessionStats.splices,
+                calls: sessionStats.calls,
+                tabId: activeTabId,
+              },
+            }).catch(() => {});
+          }
+        });
+      },
+      onSilence: () => {
+        sendToTab({
+          type: 'CAPTURE_ERROR',
+          error: 'Không nhận được âm thanh (tab im lặng hoặc DRM).',
+        });
+      },
+    });
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    browser.runtime.sendMessage({
+      type: 'STATE_UPDATE',
+      state: {
+        status: 'error',
+        error: `Không thể bắt âm thanh tab: ${errMsg}`,
+        paused: false,
+        units: sessionStats.units,
+        tsr: sessionStats.tsr,
+        retries: sessionStats.retries,
+        splices: sessionStats.splices,
+        calls: sessionStats.calls,
+        tabId: activeTabId,
+      },
+    }).catch(() => {});
+  }
 }
 
 async function startSession(
@@ -166,6 +197,7 @@ async function startSession(
     capture?.stop();
     capture = undefined;
   }
+  liveTaskQueue.clear();
   activeTabId = tabId;
   sessionSettings = settings;
   sessionRunning = true;
@@ -175,7 +207,7 @@ async function startSession(
   sessionStats.retries = 0;
   sessionStats.splices = 0;
   sessionStats.calls = 0;
-  subtitleStore.length = 0;
+  subtitleStore.length = 0; // fresh start for new session
 
   if (settings.mode === 'demo') {
     await runDemoSession(settings);
@@ -187,9 +219,10 @@ async function startSession(
 function stopSession(): void {
   sessionRunning = false;
   sessionPaused = false;
+  liveTaskQueue.clear();
   capture?.stop();
   capture = undefined;
-  subtitleStore.length = 0;
+  // NOTE: Keep subtitleStore populated so users can export .srt / .txt after stopping!
   reportState();
 }
 

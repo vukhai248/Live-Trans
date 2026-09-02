@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "terms": [
+    { "term": "npm run start", "type": "command", "note": "Giữ nguyên văn tuyệt đối" },
+    { "term": "git checkout -b", "type": "command", "note": "Giữ nguyên văn" },
+    { "term": "useEffect", "type": "code", "note": "React hook" },
+    { "term": "useState", "type": "code", "note": "React hook" },
+    { "term": "gradient descent", "type": "jargon", "vi": "hạ gradient" },
+    { "term": "backpropagation", "type": "jargon", "vi": "lan truyền ngược" },
+    { "term": "overfitting", "type": "jargon", "vi": "quá khớp" },
+    { "term": "loss function", "type": "jargon", "vi": "hàm mất mát" },
+    { "term": "GAN", "type": "acronym", "vi": "mạng đối sinh" },
+    { "term": "LLM", "type": "acronym", "vi": "mô hình ngôn ngữ lớn" },
+    { "term": "CNN", "type": "acronym", "vi": "mạng nơ-ron tích chập" }
+  ]
+}

@@ -13,7 +13,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 
 const PORT = Number(process.env.PORT ?? 8787);
-const FLASH_MODEL = 'gemini-3.5-flash';
+const FLASH_MODEL = 'gemini-3.7-flash';
 const TRANSCRIBE_MODEL = 'gemini-3.5-transcribe';
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 

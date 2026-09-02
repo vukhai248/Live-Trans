@@ -44,7 +44,7 @@ async function call(url, init) {
 // 1) Flash generateContent — is the model id + key style valid?
 console.log('\n[1] flash generateContent (translate path)');
 {
-  const r = await call(`${BASE}/models/gemini-3.5-flash:generateContent`, {
+  const r = await call(`${BASE}/models/gemini-2.5-flash:generateContent`, {
     method: 'POST',
     headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
     body: JSON.stringify({
