@@ -30,3 +30,6 @@ venv/
 .zcode/
 .DS_Store
 Thumbs.db
+
+# Folder output cloud agent (nội dung đã merge, chờ xóa)
+Live-Trans-main/
