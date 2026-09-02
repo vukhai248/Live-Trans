@@ -41,7 +41,10 @@
                       <p>Dịch live · giữ thuật ngữ</p>
                     </div>
                   </div>
-                  <span class="dot" id="popup-dot"></span>
+                  <span class="status" id="popup-status">
+                    <i class="dot" id="popup-dot"></i>
+                    <b id="popup-state">Sẵn sàng</b>
+                  </span>
                 </header>
 
                 <button class="primary" id="popup-toggle">Dịch tab này</button>
@@ -79,11 +82,12 @@
 
                 <footer>
                   <button class="link" id="popup-open-options">Cài đặt (key, mode, glossary)</button>
+                  <span class="mode-chip">Demo</span>
                 </footer>
               </div>
             </div>
           </div>
-          <p class="demo-caption">Popup — cửa sổ khi bấm icon extension (340px). Bấm nút lớn để bật/tắt &amp; xem chấm trạng thái đập.</p>
+          <p class="demo-caption">Popup — cửa sổ khi bấm icon extension (360px). Bấm nút lớn để bật/tắt &amp; xem chip trạng thái chuyển sang &ldquo;Đang dịch&rdquo;.</p>
         </section>
 
         <!-- ============ OPTIONS ============ -->
@@ -123,13 +127,15 @@
                   <div class="mode-extra" data-mode-extra="direct" hidden>
                     <label class="field">
                       <span class="label">Gemini API key</span>
-                      <input type="password" value="" placeholder="AIza..." autocomplete="off" spellcheck="false" />
+                      <input type="password" value="" placeholder="AIza..." />
+                      <span class="hintline">Lấy key miễn phí tại aistudio.google.com/apikey — key mới mặc định là auth key (Google bắt buộc từ 9/2026). Key chỉ lưu trên máy bạn.</span>
                     </label>
                   </div>
                   <div class="mode-extra" data-mode-extra="gateway" hidden>
                     <label class="field">
                       <span class="label">Gateway URL</span>
-                      <input type="text" value="" placeholder="http://localhost:8787" />
+                      <input type="text" value="http://localhost:8787" placeholder="http://localhost:8787" />
+                      <span class="hintline">Chạy local: node gateway/gateway.mjs — key nằm trong gateway/.env, extension không giữ key.</span>
                     </label>
                   </div>
 

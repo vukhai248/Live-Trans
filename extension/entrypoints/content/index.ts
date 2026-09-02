@@ -84,34 +84,40 @@ const CSS = `
   :host { all: initial; }
   .lt-root {
     position: fixed; inset: 0; pointer-events: none; z-index: 2147483647;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, sans-serif;
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   }
   .lt-title {
     position: absolute; left: 50%; transform: translateX(-50%);
     display: none; flex-direction: column; gap: 2px; max-width: min(760px, 90vw);
-    background: linear-gradient(135deg, rgba(17,24,39,.96), rgba(31,41,55,.92));
-    color: #fff; padding: 10px 16px; border-radius: 12px;
-    box-shadow: 0 8px 28px rgba(0,0,0,.35); backdrop-filter: blur(6px);
+    background: rgba(9, 11, 18, .84); border: 1px solid rgba(255,255,255,.12);
+    color: #fff; padding: 10px 16px 11px; border-radius: 14px;
+    box-shadow: 0 18px 44px -14px rgba(0,0,0,.65);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
   }
-  .lt-title .lt-original { font-size: 12px; opacity: .72; font-weight: 500; }
-  .lt-title .lt-translated { font-size: 16px; font-weight: 650; line-height: 1.3; }
+  .lt-title .lt-original { font-size: 12px; opacity: .66; font-weight: 500; letter-spacing: .01em; }
+  .lt-title .lt-translated { font-size: 16px; font-weight: 650; line-height: 1.35; letter-spacing: -.01em; }
   .lt-sub {
     position: absolute; left: 50%; transform: translateX(-50%);
     display: none; flex-direction: column; gap: 3px; text-align: center;
-    max-width: min(720px, 92vw); padding: 10px 16px; border-radius: 10px;
-    background: rgba(0,0,0,.62); color: #fff;
-    box-shadow: 0 6px 20px rgba(0,0,0,.32);
+    max-width: min(720px, 92vw); padding: 9px 16px 11px; border-radius: 13px;
+    background: rgba(8, 10, 16, .8); border: 1px solid rgba(255,255,255,.1);
+    color: #fff; box-shadow: 0 18px 44px -12px rgba(0,0,0,.65);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   }
-  .lt-sub .lt-translated { font-size: 22px; font-weight: 650; line-height: 1.35; }
-  .lt-sub .lt-original { font-size: 14px; opacity: .78; }
+  .lt-sub .lt-translated { font-size: 22px; font-weight: 650; line-height: 1.4; letter-spacing: -.01em; text-shadow: 0 1px 2px rgba(0,0,0,.45); }
+  .lt-sub .lt-original { font-size: 13.5px; opacity: .68; }
   .lt-badge {
-    display: inline-block; background:#f59e0b; color:#111; font-size:11px; font-weight:700;
-    border-radius: 6px; padding: 1px 5px; margin-left: 6px; vertical-align: middle;
+    display: inline-block; background: rgba(245,180,68,.16); border: 1px solid rgba(245,180,68,.42);
+    color: #fbd38d; font-size: 11px; font-weight: 700;
+    border-radius: 999px; padding: 1.5px 8px; margin-left: 8px; vertical-align: middle;
+    white-space: nowrap;
   }
   .lt-notice {
     position: absolute; right: 16px; top: 16px; display: none;
-    max-width: 340px; background: rgba(127,29,29,.95); color:#fff;
-    padding: 9px 12px; border-radius: 10px; font-size: 13px;
+    max-width: 340px; background: rgba(64, 14, 26, .92); border: 1px solid rgba(244,84,122,.35);
+    color: #ffe4e9; padding: 10px 13px; border-radius: 12px; font-size: 13px; line-height: 1.45;
+    box-shadow: 0 14px 34px -10px rgba(0,0,0,.6);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   }
 `;
 

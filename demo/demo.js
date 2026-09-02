@@ -34,6 +34,8 @@
      ========================================================= */
   var toggleBtn = $('popup-toggle');
   var dot = $('popup-dot');
+  var statusEl = $('popup-status');
+  var stateEl = $('popup-state');
   var mTsr = $('m-tsr');
   var mUnits = $('m-units');
   var mCalls = $('m-calls');
@@ -48,6 +50,8 @@
     toggleBtn.textContent = on ? 'Dừng dịch' : 'Dịch tab này';
     toggleBtn.classList.toggle('danger', on);
     dot.classList.toggle('dot-on', on);
+    if (statusEl) statusEl.classList.toggle('on', on);
+    if (stateEl) stateEl.textContent = on ? 'Đang dịch' : 'Sẵn sàng';
 
     if (on) {
       // reset + start a faux live session

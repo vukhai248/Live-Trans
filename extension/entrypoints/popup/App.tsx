@@ -126,7 +126,10 @@ export function App() {
             <p>Dịch live · giữ thuật ngữ</p>
           </div>
         </div>
-        <span class={`dot ${running ? 'dot-on' : ''}`} />
+        <span class={`status ${running ? 'on' : ''}`}>
+          <i class="dot" />
+          <b>{running ? (paused ? 'Tạm dừng' : 'Đang dịch') : 'Sẵn sàng'}</b>
+        </span>
       </header>
 
       <button
@@ -216,6 +219,9 @@ export function App() {
         <button class="link" onClick={() => void browser.runtime.openOptionsPage()}>
           Cài đặt (key, mode, glossary)
         </button>
+        <span class={`mode-chip mode-${settings.mode}`}>
+          {settings.mode === 'demo' ? 'Demo' : settings.mode === 'direct' ? 'Direct' : 'Gateway'}
+        </span>
       </footer>
     </div>
   );

@@ -102,7 +102,10 @@ function General({
       </div>
 
       {settings.mode === 'direct' && (
-        <Field label="Gemini API key">
+        <Field
+          label="Gemini API key"
+          hint="Lấy key miễn phí tại aistudio.google.com/apikey — key mới mặc định là auth key (Google bắt buộc từ 9/2026). Key chỉ lưu trên máy bạn."
+        >
           <input
             type="password"
             value={settings.apiKey}
@@ -113,7 +116,10 @@ function General({
       )}
 
       {settings.mode === 'gateway' && (
-        <Field label="Gateway URL">
+        <Field
+          label="Gateway URL"
+          hint="Chạy local: node gateway/gateway.mjs — key nằm trong gateway/.env, extension không giữ key."
+        >
           <input
             type="text"
             value={settings.gatewayUrl}
@@ -125,7 +131,7 @@ function General({
 
       <h2>Ngôn ngữ & hiển thị</h2>
       <div class="grid-2">
-        <Field label="Ngôn ngữ đích">
+        <Field label="Ngôn ngữ đích" hint="Mã ngôn ngữ: vi, en, ja, ko, zh, fr, de, es…">
           <input
             type="text"
             value={settings.targetLang}
@@ -133,7 +139,10 @@ function General({
             onInput={(e) => update({ targetLang: (e.target as HTMLInputElement).value })}
           />
         </Field>
-        <Field label="Ngôn ngữ nguồn (auto để tự nhận)">
+        <Field
+          label="Ngôn ngữ nguồn (auto để tự nhận)"
+          hint="auto = Gemini tự nhận diện (hỗ trợ 85+ ngôn ngữ)"
+        >
           <input
             type="text"
             value={settings.sourceLang}
@@ -144,7 +153,10 @@ function General({
       </div>
 
       <div class="grid-2">
-        <Field label={`Độ dài chunk ASR: ${settings.chunkSeconds}s`}>
+        <Field
+          label={`Độ dài chunk ASR: ${settings.chunkSeconds}s`}
+          hint="Chunk ngắn → phụ đề đến nhanh hơn nhưng tốn nhiều lời gọi API hơn (khuyến nghị 45s)"
+        >
           <input
             type="range"
             min={30}
@@ -360,15 +372,18 @@ function ModeButton({
 
 function Field({
   label,
+  hint,
   children,
 }: {
   label: string;
+  hint?: string;
   children: preact.ComponentChildren;
 }) {
   return (
     <label class="field">
       <span class="label">{label}</span>
       {children}
+      {hint && <span class="hintline">{hint}</span>}
     </label>
   );
 }
