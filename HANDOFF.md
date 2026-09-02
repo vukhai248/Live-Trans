@@ -1,6 +1,6 @@
-# HANDOFF — Live-Trans (cập nhật 2026-09-03)
+# HANDOFF — Live-Trans (cập nhật 2026-09-03, lần 2)
 
-> 📌 **Tình trạng: video path HOÃN TẠM — chuyển ưu tiên sang dịch PDF/paper giữ layout.**
+> 📌 **VIỆC LÀM TIẾP: PHẦN PDF/PAPER — LÀM TRƯỚC LUÔN (xem §1 P). Video path HOÃN TẠM (§3).**
 > File này để buổi làm việc kế tiếp (hoặc agent khác) nắm toàn bộ bối cảnh trong vài phút. Nguồn sự thật kiến trúc: [`docs/plan.md`](docs/plan.md). Quyết định mới nhất: [`docs/open-questions.md`](docs/open-questions.md).
 
 ## 0. Bối cảnh làm việc với chủ project (ĐỌC TRƯỚC KHI LÀM)
@@ -12,17 +12,81 @@
 - API key test nằm trong `.env` ở gốc repo (đã gitignore, KHÔNG commit, KHÔNG in ra log). Khi app ổn sẽ bỏ và chuyển sang key người dùng tự nhập.
 - Benchmark cốt lõi: **giữ thuật ngữ học thuật & code nguyên văn** (`npm run start`, `useEffect`...), đo bằng TSR ≥ 95%.
 
-## 1. Hướng mới (quyết định 2026-09-03)
+## 1. P. ⭐ PHẦN PDF/PAPER — LÀM TRƯỚC (spec đầy đủ, chốt với chủ project 2026-09-03)
 
-| Việc | Trạng thái |
-|---|---|
-| **Dịch PDF/paper giữ nguyên layout** (hình vẽ, template, thuật ngữ) | ⏭️ **ƯU TIÊN MỚI** — bắt đầu kế tiếp |
-| Model dịch: **`gemini-3.5-flash-lite`** thay `gemini-3.5-flash` | Ý kiến chủ project: flash-lite **limit cao hơn** flash. Chưa đổi trong code — đổi khi làm PDF |
-| Video live-translate (chunked + Live API) | ⏸️ HOÃN — pipeline gần xong, còn 2 vấn đề mở (§3) |
-| UI theme đen/xanh (dark) + sáng/xanh (light) + icon library chuyên nghiệp (Lucide/Tabler thay emoji) | ⏳ Chưa làm — của cả popup/options/overlay |
-| Tự động lấy API key cho user | ⏳ Chỉ làm khi app đã hoạt động ổn |
+### 1.P.1. Định hướng sản phẩm (đã chốt, KHÔNG phải tải PDF về)
 
-Gợi ý kiến trúc PDF (từ `plan.md` §10, giữ nguyên nguyên tắc glossary dùng chung): BabelDOC (engine giữ layout, AGPL-3.0) bọc trong local service + Gemini làm translator; HOẶC tự build pipeline PyMuPDF + LLM nếu muốn tránh AGPL. Cần thảo luận lại khi bắt đầu.
+Dịch paper **ngay trong extension, trên web**:
+
+1. User mở paper PDF trên web (arxiv, mọi URL .pdf). **Nút nổi (FAB) góc trên** trang — bấm vào.
+2. Mở **tab mới = viewer dịch của extension**: render trang PDF + **thay chữ gốc bằng chữ đã dịch** ngay trên layout gốc (giữ hình vẽ, bảng, công thức ở dạng ảnh/vector không đụng vào).
+3. **3 chế độ xem** (toggle trong viewer): **Chỉ bản dịch** (mặc định) · **Song song** (2 cột: gốc | dịch) · **Chỉ bản gốc** (PDF gốc nguyên vẹn).
+4. Dịch theo trang khi cuốn tới (lazy, page-by-page), cache theo URL+page để lật lại không tốn quota.
+
+### 1.P.2. Model & quota (chốt)
+
+- Dịch bằng **`gemini-3.5-flash-lite`** — ý kiến chủ project: **limit cao hơn** `gemini-3.5-flash` (flash thường đã dính 429 ở video path). KHÔNG dùng flash thường cho PDF.
+- Reference code chủ project cung cấp (python `google-genai`): `model="gemini-3.5-flash-lite"`, config `thinking_config=thinking_level="MINIMAL"`. Bản TS tương đương: `thinkingConfig: { thinkingLevel: 'MINIMAL' }` trong GenerateContentConfig.
+- Đã xác minh ở CLI prototype: flash-lite + `response_mime_type: 'application/json'` hoạt động; batch 12 block/call; 429 → đã có `fetch-retry.ts` chờ theo `Retry-After` (dùng lại nguyên văn).
+
+### 1.P.3. Trạng thái chuẩn bị (đã có sẵn trong repo)
+
+| Tài sản | Vị trí | Ghi chú |
+|---|---|---|
+| CLI prototype PyMuPDF (Python, chạy được sau khi fix syntax) | `backend/translate_paper.py` | Chứng minh thuật toán: extract block + bbox → batch JSON → redact text giữ ảnh → chèn lại. **Tham khảo thuật toán**, không dùng trực tiếp trong extension |
+| Paper mẫu (Universal Guidance for Diffusion Models, 15 trang, 612×792pt, ~250 text block) | `backend/samples/2302.07121.pdf` (53MB, gitignored) — URL gốc: `https://arxiv.org/pdf/2302.07121` | Đã inspect: text block = `page.get_text('dict')`, block ảnh type=1 giữ nguyên |
+| Font Noto Sans có dấu tiếng Việt (Regular + Bold) | `backend/fonts/` | Extension dùng font riêng hoặc web font khi chèn |
+| Glossary mẫu | `tests/fixtures/golden-glossary.json` | Format `{term, type: command|code|jargon|acronym, vi}` |
+| **Pipeline dịch TS tái sử dụng NGUYÊN VĂN** | `extension/lib/masker/`, `extension/lib/glossary/` (selector ≤25 term, validator TSR), `extension/lib/translate/` (batcher + prompt + JSON parse), `lib/providers/fetch-retry.ts` (429 Retry-After) | Chỉ cần thay nguồn text: thay chunk audio bằng các block PDF |
+| Provider abstraction | `extension/lib/providers/` | Thêm method `translateBlocks()` vào interface hoặc gọi direct prompt builder |
+
+### 1.P.4. Kiến trúc kỹ thuật đề xuất (agent thực hiện theo hướng này)
+
+```
+[Trang web PDF (arxiv...)] --FAB click--> [mở tab chrome-extension://<id>/viewer/viewer.html?url=<pdf-url>]
+
+VIEWER (extension page — có mọi quyền extension):
+├─ pdfjs-dist: fetch PDF (host_permissions <all_urls> đã có) → render canvas từng trang
+│   + page.getTextContent() → text items (mỗi item: str + transform matrix + width)
+├─ lib/pdf/blocks.ts (MỚI): nhóm text items → block/đoạn
+│   thuật toán (tham khảo backend/translate_paper.py extract_blocks):
+│   sort theo y rồi x; gộp item cùng dòng (|Δy| < fontsize*0.5), gộp dòng liền kề
+│   thành đoạn (khoảng cách dòng < 1.6×line-height VÀ cùng cột — PDF 2 cột academic
+│   phải tách theo cột: chia page theo x-midpoint hoặc gap ngang lớn giữa các item)
+├─ lib/pdf/translate.ts (MỚI): batch BLOCK_SIZE=10-12 block → DirectGeminiProvider
+│   với FLASH_LITE model + prompt giữ thuật ngữ + response_mime_type JSON
+│   (masker ⟦n⟧ cho code/URL/công thức $...$; selector glossary ≤25 term/batch;
+│   validate + retry 1 lần — y hệt video path)
+├─ Overlay dịch: absolute-positioned divs ĐÈ LÊN canvas, mỗi div 1 block đã dịch,
+│   vị trí = bbox của block gốc (scale theo viewport), tự co chữ nếu tràn (scale_low)
+└─ 3 chế độ: translated (che canvas text — pdf.js render KHÔNG textLayer → chỉ ảnh
+   + vector còn, text thay bằng overlay) | side-by-side (2 canvas) | original (canvas thuần)
+```
+
+**Lưu ý kỹ thuật pdfjs-dist (bẫy đã biết):**
+- Cài `pdfjs-dist` vào `extension/`; worker: `import * as pdfjsLib from 'pdfjs-dist'` + `pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('/pdf.worker.min.mjs')` — copy worker vào output (WXT: đặt trong `public/` hoặc config Vite).
+- Bật `isEvalSupported: false` tuỳ chọn (CSP); với CJK cần cMaps (`cMapUrl` trỏ vào bundle) — MVP bỏ qua CJK, chỉ Anh→Việt.
+- Text item transform: `[a,b,c,d,e,f]` — fontsize ≈ `Math.hypot(b, d)` (bzw `scale`), vị trí `e, f` là baseline.
+- Trang PDF arxiv mẫu: 612×792pt (2 cột academic).
+- **arxiv URL `/pdf/xxxx` trả HTML viewer mới của arxiv, KHÔNG phải PDF thuần** → viewer fetch URL đó có thể nhận HTML; xử lý: nếu content-type ≠ application/pdf → thử URL gốc `.pdf` (arxiv cho phép `/pdf/2302.07121v1.pdf`) hoặc tìm `<iframe>/<embed>` src. Đã test: fetch trực tiếp với UA thường trả PDF ✓ (curl được, 53MB).
+- Cache: `chrome.storage.session` key `pdf:<hash-url>:p<page>` lưu blocks+translations (session storage tự xoá khi đóng browser — an toàn nội dung bản quyền).
+- Quota: flash-lite limit cao hơn; vẫn batch 10–12 block/call + fetch-retry 429 có sẵn. 15 trang ≈ 21 calls — thoải mái.
+
+### 1.P.5. Việc cần làm cụ thể (checklist cho agent)
+
+- [ ] `npm i pdfjs-dist` trong `extension/` + cấu hình worker vào build (WXT)
+- [ ] `extension/lib/pdf/blocks.ts` — extract + group block (kèm unit test với fixture text items giả)
+- [ ] `extension/lib/pdf/translate.ts` — batch dịch qua provider (flash-lite) + cache `chrome.storage.session`
+- [ ] `extension/entrypoints/viewer/` — trang viewer (html + main.ts): url param, render, 3 chế độ, progress "đang dịch trang N"
+- [ ] `entrypoints/content/index.ts` — thêm FAB khi URL kết thúc `.pdf` HOẶC host arxiv.org/pdf/* (và trang chứa `<embed type="application/pdf">`) → `chrome.tabs.create({url: viewer?url=...})`
+- [ ] `lib/protocol/messages.ts` + settings: thêm `pdfTargetLang` (mặc định vi) nếu cần
+- [ ] Đổi model dịch PDF: hằng số `FLASH_LITE_MODEL = 'gemini-3.5-flash-lite'` trong lib/pdf (KHÔNG đụng FLASH_MODEL của video path)
+- [ ] Test thật (kịch bản §6, thay bước 3-4 bằng: mở arxiv → FAB → viewer) + CDP screenshot từng trạng thái
+- [ ] Acceptance: paper 15 trang — hình vẽ/bảng KHÔNG bị đụng; thuật ngữ + citation [1] nguyên văn; 3 chế độ chuyển được; lật lại trang đã dịch không tốn call
+
+### 1.P.6. Backend CLI (side tool, không bắt buộc cho sản phẩm)
+
+`backend/translate_paper.py` — prototype Python PyMuPDF đã viết (đã fix syntax `global`), chứng minh thuật toán redact+chèn. Cài: `pip install pymupdf google-genai` vào conda **DL** (đã cài). Chạy: `python backend/translate_paper.py backend/samples/2302.07121.pdf --pages 1-3`. Chưa chạy end-to-end (đứng lại khi pivot sang web viewer) — lỗi tiềm ẩn có thể còn; dùng để đối chiếu thuật toán khi làm `lib/pdf/`.
 
 ## 2. Trạng thái video path — ĐÃ CHẠY ĐƯỢC THẬT (bằng chứng)
 
@@ -117,8 +181,10 @@ node scripts/cdp-ext.mjs state  # snapshot units
 - Popup.html KHÔNG mở được như tab thường (`ERR_BLOCKED_BY_CLIENT`) — chỉ qua action click/shortcut.
 - MV3 offscreen document: KHÔNG có `chrome.tabs` — chỉ `chrome.runtime` + một số API hạn chế.
 
-## 9. Việc tiếp theo (thứ tự ưu tiên mới)
+## 9. Việc tiếp theo (thứ tự ưu tiên — cập nhật 2026-09-03 lần 2)
 
-1. **[MỚI] PDF/paper translation giữ layout** — thảo luận kiến trúc (BabelDOC vs tự build) → scaffold → MVP. Dùng `gemini-3.5-flash-lite` cho khâu dịch. Glossary/masker/validator hiện có tái sử dụng được gần như toàn bộ (chúng là text-in/text-out).
-2. Video path (khi quay lại): verify overlay với units thật sau khi quota hồi → giải §3.2 → Live API mode (M4) → UI theme (§1).
-3. UI overhaul (dark đen/xanh, light sáng/xanh, icon Lucide/Tabler): làm khi 1 trong 2 tính năng chính ổn định.
+1. **⭐ PDF/paper web viewer — LÀM TRƯỚC LUÔN** theo spec §1.P (checklist §1.P.5). Bắt đầu bằng `npm i pdfjs-dist` + `lib/pdf/blocks.ts`.
+2. Video path (khi quay lại): verify overlay với units thật sau khi quota hồi → giải §3.2 → Live API mode (M4).
+3. Đổi model dịch video sang flash-lite (đồng bộ với quyết định PDF) — 1 dòng ở `direct-gemini.ts`, nhưng phải test lại vì video path nhạy latency hơn.
+4. UI overhaul (dark đen/xanh, light sáng/xanh, icon Lucide/Tabler): làm khi PDF viewer ổn.
+5. Backend CLI `translate_paper.py`: chạy lại end-to-end để đối chiếu thuật toán (side tool, không chặn sản phẩm).
