@@ -229,13 +229,13 @@ body, html {
   border: 1px solid var(--border-color);
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 3px 8px;
+  padding: 4px;
+  width: 24px;
+  height: 24px;
   border-radius: 6px;
-  font-size: 11px;
-  font-weight: 500;
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
   transition: all 0.15s;
 }
 

@@ -39,3 +39,4 @@
 5. **Hiển thị tiến triển**: batch xong là hiện, không đợi chunk.
 
 Chi tiết đầy đủ (bằng chứng research, pipeline từng bước, ngân sách token, API key policy, milestone, risk): **`plan.md`**.
+Kiến trúc trình đọc PDF chuyên sâu & lịch sử tính năng: **`pdf-viewer.md`**.
