@@ -351,8 +351,18 @@ export function isMathFragment(text: string): boolean {
   // If there are 3 or more English words, it is a prose sentence, NOT a standalone equation
   if (words.length >= 3) return false;
 
+  // Lines that begin with subordinate sentence clauses ("where ", "with ", "and ", etc.)
+  // without an equation tag "(1)" are inline prose continuations, NOT standalone equation blocks!
+  const hasEquationNumber = /\(\s*\d+(\.\d+)?\s*\)$/.test(t);
+  if (
+    !hasEquationNumber &&
+    /^(where|with|for|and|in\s+which|such\s+that|here|when|denoting|defining|wherever)\b/i.test(t)
+  ) {
+    return false;
+  }
+
   // 1. Standalone equation number at end: e.g. "(1)", "(2)", "(3)"
-  if (/\(\s*\d+(\.\d+)?\s*\)$/.test(t)) {
+  if (hasEquationNumber) {
     if (t.length < 80) return true;
     if (/[=≈∼≤≥±×÷∇∑∏∫√\\_{}^αβγδεθλμστωϕψ]/.test(t)) return true;
   }
@@ -642,12 +652,35 @@ export function groupIntoBlocks(lines: LineItem[], pageNumber: number): TextBloc
           : Math.max(prev.h, curr.h) * 1.65;
       const minAllowedSpacing = isPrevFormula && isCurrFormula ? -20 : -4;
 
+      // Academic Paragraph Break detection in body prose:
+      // 1. Previous line ended a sentence with punctuation (. ? ! : or trailing quote/parenthesis)
+      // 2. AND Current line starts with a capital letter, quote, or bullet
+      // 3. AND either:
+      //    (a) Current line has a distinct first-line indentation relative to column baseline
+      //    (b) Previous line ended noticeably short before the column right margin
+      //    (c) Extra vertical spacing between paragraphs
+      const baseColX = Math.min(...currentBlockLines.map((l) => l.x));
+      const maxColW = Math.max(...currentBlockLines.map((l) => l.w));
+      const prevEndsSentence = /[.?!:]["'”’)]?$/.test(prev.text.trim());
+      const isIndented = curr.x > baseColX + 4.5;
+      const prevEndsShort = maxColW > 100 && prev.w < maxColW - 18;
+      const hasExtraSpacing = lineSpacing >= Math.max(prev.h, curr.h) * 1.18 && lineSpacing <= maxAllowedSpacing;
+      const currStartsSentence = /^[A-Z0-9"“'‘•\-]/.test(curr.text.trim());
+
+      const isParagraphBreak =
+        !isPrevFormula &&
+        !isCurrFormula &&
+        prevEndsSentence &&
+        currStartsSentence &&
+        (isIndented || prevEndsShort || hasExtraSpacing);
+
       isConsecutive =
         isSameCol &&
         !isHeaderBreak &&
         !isHeadingBreak &&
         !isAlgoBreak &&
         !isFormulaBreak &&
+        !isParagraphBreak &&
         !isFootnoteBreak &&
         lineSpacing >= minAllowedSpacing &&
         lineSpacing <= maxAllowedSpacing &&

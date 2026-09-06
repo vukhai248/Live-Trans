@@ -324,3 +324,11 @@ Gateway mode + auto-detect `/health`; token queue; retry/backoff 429/5xx; export
   + Thay vì chỉ hiển thị text thuần, mỗi khối component sẽ hiển thị Markdown và render công thức LaTeX bằng KaTeX.
   + Từng khối component hoạt động độc lập, có thanh cuộn riêng (scroll container) khi văn bản tiếng Việt dài hơn khung gốc, giúp người dùng cuộn xem trọn vẹn mà không che lấp hay đè lên các khối component bên dưới.
 
+### 12.3. Cập nhật v0.2.1: Khắc phục lỗi bố cục, công thức & tối ưu hóa Model AI
+- **Chuyển đổi Model mặc định sang Gemini 3.5 Flash-Lite**: Tận dụng quota dồi dào, tốc độ dịch tức thì và khả năng hiểu đa phương thức vượt trội so với các thế hệ trước.
+- **Giữ trọn vẹn mệnh đề toán học nội tuyến**: Tinh chỉnh bộ lọc phân loại để các mệnh đề nối ("where $z_{t-1} = S(...)$") không bị ngắt thành snippet ảnh cắt dở mà nằm liền mạch trong đoạn văn bản.
+- **Chuẩn hóa tự động ký hiệu $(f, \ell)$ và $S(\cdot, \cdot, \cdot)$**: Nhận diện lỗi font PDF `(f, 1)` / `(f, l)` và chuyển đổi sang LaTeX KaTeX chuẩn xác.
+- **Phân tách đoạn văn học thuật chuẩn xác**: Tự động nhận diện ranh giới đoạn văn theo thụt lề đầu dòng (`indentation`), dòng trước kết thúc câu ngắn và dãn cách dòng, giúp các đoạn văn bản hiển thị rõ ràng, tách bạch.
+- **Sửa triệt để lỗi đồng bộ cuộn (Scroll Sync)**: Sửa thuật toán tính toán vị trí trang trong chế độ Song ngữ (Bilingual), loại bỏ hoàn toàn hiện tượng pane trái bị kéo giật ngược về Trang 1 khi cuộn bên phải.
+
+

@@ -281,6 +281,7 @@ body, html {
 
 /* BILINGUAL DUAL PANELS */
 .lt-pane {
+  position: relative;
   flex: 1;
   overflow-y: auto;
   overflow-x: auto;
@@ -962,12 +963,60 @@ h3.lt-md-heading {
   word-break: break-word;
 }
 
-/* Equation snippet container */
+/* Equation container (Hộp công thức KaTeX & Snippet) */
 .lt-wb-equation {
   display: flex;
   justify-content: center;
   margin: 8px 0;
   padding: 4px 0;
+}
+
+.lt-wb-equation-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+  margin: 8px 0;
+  padding: 6px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.lt-wb-eq-math {
+  display: flex;
+  justify-content: safe center;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  font-size: 0.82em;
+}
+
+.lt-wb-eq-math .katex-display {
+  margin: 2px 0 !important;
+}
+
+.lt-wb-eq-math .katex {
+  font-size: 1em;
+}
+
+.lt-wb-eq-num {
+  font-size: 9pt;
+  color: #64748b;
+  font-family: 'Times New Roman', 'Nimbus Roman No9 L', 'STIX Two Text', serif;
+  padding-left: 8px;
+  flex-shrink: 0;
+}
+
+.lt-wb-display-math {
+  display: block;
+  text-align: center;
+  margin: 8px 0;
 }
 
 .lt-snippet-container {

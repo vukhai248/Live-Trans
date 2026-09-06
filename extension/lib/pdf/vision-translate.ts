@@ -4,7 +4,7 @@ import { fetchWithRetry } from '../providers/fetch-retry';
 import { getKeyRouter } from '../providers/key-router';
 
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
-const VISION_CANDIDATE_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+const VISION_CANDIDATE_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.5-flash'];
 
 /**
  * Builds the specialized Academic Multimodal Paper Translation Prompt
@@ -82,7 +82,7 @@ function getVisionCacheKey(pdfUrl: string, pageNumber: number, model: string): s
 export function getCachedVisionTranslation(
   pdfUrl: string,
   pageNumber: number,
-  model: string = 'gemini-2.5-flash',
+  model: string = 'gemini-3.5-flash-lite',
 ): string | null {
   try {
     const key = getVisionCacheKey(pdfUrl, pageNumber, model);
@@ -96,7 +96,7 @@ export function setCachedVisionTranslation(
   pdfUrl: string,
   pageNumber: number,
   markdown: string,
-  model: string = 'gemini-2.5-flash',
+  model: string = 'gemini-3.5-flash-lite',
 ): void {
   try {
     const key = getVisionCacheKey(pdfUrl, pageNumber, model);
@@ -118,7 +118,7 @@ export async function translatePageVision(
 ): Promise<string> {
   const modelToUse = settings.pdfModel?.includes('flash')
     ? settings.pdfModel
-    : VISION_CANDIDATE_MODELS[0]!;
+    : 'gemini-3.5-flash-lite';
 
   if (!force) {
     const cached = getCachedVisionTranslation(pdfUrl, pageNumber, modelToUse);

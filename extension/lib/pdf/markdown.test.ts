@@ -52,4 +52,14 @@ describe('PDF to Markdown elements conversion', () => {
     expect(elements[2]!.type).toBe('formula');
     expect(elements[2]!.equationNumber).toBe('(1)');
   });
+
+  it('normalizes (f, 1) and (f, l) loss function pairs to $(f, \\ell)$', () => {
+    expect(wrapInlineMath('We define guidance with pair (f, 1) in diffusion.')).toContain('$(f, \\ell)$');
+    expect(wrapInlineMath('We define guidance with pair (f, l) in diffusion.')).toContain('$(f, \\ell)$');
+  });
+
+  it('normalizes S(·, ·, ·) math notation into LaTeX cdot', () => {
+    const wrapped = wrapInlineMath('Define abstraction function S(·, ·, ·) for sampling.');
+    expect(wrapped).toContain('$S(\\cdot, \\cdot, \\cdot)$');
+  });
 });

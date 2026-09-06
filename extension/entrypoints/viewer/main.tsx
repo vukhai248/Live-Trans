@@ -122,7 +122,7 @@ export function ViewerApp() {
     if (readerMode === 'vision' && pdfUrl && numPages > 0) {
       const initialTrans: Record<number, string> = {};
       const initialStatus: Record<number, 'done'> = {};
-      const model = settings.pdfModel || 'gemini-2.5-flash';
+      const model = settings.pdfModel || 'gemini-3.5-flash-lite';
       for (let p = 1; p <= numPages; p++) {
         const cached = getCachedVisionTranslation(pdfUrl, p, model);
         if (cached) {
@@ -146,26 +146,37 @@ export function ViewerApp() {
 
     isSyncingScroll.current = true;
 
-    // Detect which page is at the top of the left pane
+    // Detect which page is closest or currently visible at the top of the left pane
     const leftPages = left.querySelectorAll<HTMLElement>('.lt-page-wrap');
-    let currentPno = 1;
+    let bestPno = currentPage;
     let pageOffsetRatio = 0;
+    let minDistance = Infinity;
 
     for (let i = 0; i < leftPages.length; i++) {
       const p = leftPages[i];
       if (!p) continue;
       const top = p.offsetTop;
       const height = p.offsetHeight;
-      if (left.scrollTop >= top - 20 && left.scrollTop < top + height) {
-        currentPno = Number(p.dataset.pageNumber || i + 1);
+      const pno = Number(p.dataset.pageNumber || i + 1);
+
+      if (left.scrollTop >= top - 24 && left.scrollTop < top + height) {
+        bestPno = pno;
         pageOffsetRatio = Math.max(0, Math.min(1, (left.scrollTop - top) / height));
+        minDistance = 0;
         break;
+      }
+
+      const dist = Math.abs(left.scrollTop - top);
+      if (dist < minDistance) {
+        minDistance = dist;
+        bestPno = pno;
+        pageOffsetRatio = left.scrollTop >= top + height ? 1 : 0;
       }
     }
 
     // Align right pane to the exact corresponding page
     const rightPage = right.querySelector<HTMLElement>(
-      `.lt-whiteboard-page[data-page-number="${currentPno}"], .lt-page-wrap[data-page-number="${currentPno}"], .lt-markdown-page[data-page-number="${currentPno}"], .lt-vision-page[data-page-number="${currentPno}"]`
+      `.lt-whiteboard-page[data-page-number="${bestPno}"], .lt-page-wrap[data-page-number="${bestPno}"], .lt-markdown-page[data-page-number="${bestPno}"], .lt-vision-page[data-page-number="${bestPno}"]`
     );
     if (rightPage) {
       right.scrollTop = rightPage.offsetTop + rightPage.offsetHeight * pageOffsetRatio;
@@ -175,7 +186,7 @@ export function ViewerApp() {
       right.scrollTop = ratio * (right.scrollHeight - right.clientHeight);
     }
 
-    setCurrentPage(currentPno);
+    setCurrentPage(bestPno);
     requestAnimationFrame(() => {
       isSyncingScroll.current = false;
     });
@@ -189,28 +200,39 @@ export function ViewerApp() {
 
     isSyncingScroll.current = true;
 
-    // Detect which page is at the top of the right pane
+    // Detect which page is closest or currently visible at the top of the right pane
     const rightPages = right.querySelectorAll<HTMLElement>(
       '.lt-whiteboard-page, .lt-page-wrap, .lt-markdown-page, .lt-vision-page'
     );
-    let currentPno = 1;
+    let bestPno = currentPage;
     let pageOffsetRatio = 0;
+    let minDistance = Infinity;
 
     for (let i = 0; i < rightPages.length; i++) {
       const p = rightPages[i];
       if (!p) continue;
       const top = p.offsetTop;
       const height = p.offsetHeight;
-      if (right.scrollTop >= top - 20 && right.scrollTop < top + height) {
-        currentPno = Number(p.dataset.pageNumber || i + 1);
+      const pno = Number(p.dataset.pageNumber || i + 1);
+
+      if (right.scrollTop >= top - 24 && right.scrollTop < top + height) {
+        bestPno = pno;
         pageOffsetRatio = Math.max(0, Math.min(1, (right.scrollTop - top) / height));
+        minDistance = 0;
         break;
+      }
+
+      const dist = Math.abs(right.scrollTop - top);
+      if (dist < minDistance) {
+        minDistance = dist;
+        bestPno = pno;
+        pageOffsetRatio = right.scrollTop >= top + height ? 1 : 0;
       }
     }
 
     // Align left pane to the exact corresponding page
     const leftPage = left.querySelector<HTMLElement>(
-      `.lt-page-wrap[data-page-number="${currentPno}"]`
+      `.lt-page-wrap[data-page-number="${bestPno}"]`
     );
     if (leftPage) {
       left.scrollTop = leftPage.offsetTop + leftPage.offsetHeight * pageOffsetRatio;
@@ -220,7 +242,7 @@ export function ViewerApp() {
       left.scrollTop = ratio * (left.scrollHeight - left.clientHeight);
     }
 
-    setCurrentPage(currentPno);
+    setCurrentPage(bestPno);
     requestAnimationFrame(() => {
       isSyncingScroll.current = false;
     });
@@ -324,13 +346,11 @@ export function ViewerApp() {
 
     // 1. Kiểm tra cache trước — nạp tức thì mà không cần xếp hàng slot mạng
     if (!force) {
-      const modelToUse = settings.pdfModel || 'gemini-2.5-flash';
+      const modelToUse = settings.pdfModel || 'gemini-3.5-flash-lite';
       const candidates = [
         modelToUse,
-        'gemini-2.5-flash',
-        'gemini-2.0-flash',
-        'gemini-1.5-flash',
-        'gemini-2.5-flash-lite',
+        'gemini-3.5-flash-lite',
+        'gemini-3.5-flash',
       ];
       for (const m of candidates) {
         const cached = getCachedVisionTranslation(pdfUrl, pageNumber, m);
@@ -698,7 +718,7 @@ export function ViewerApp() {
                     </svg>
                     <strong style={{ color: '#c084fc' }}>Vision AI (Thị giác Đa phương thức)</strong>
                   </div>
-                  <div class="lt-dropdown-item-desc">Chụp ảnh trang gửi Gemini 2.5 Flash, công thức KaTeX & Markdown học thuật siêu chuẩn.</div>
+                  <div class="lt-dropdown-item-desc">Chụp ảnh trang gửi Gemini 3.5 Flash-Lite, công thức KaTeX & Markdown học thuật siêu chuẩn.</div>
                 </div>
 
                 <div
@@ -890,7 +910,7 @@ export function ViewerApp() {
                 <label class="lt-setting-label">Mô hình AI (Model)</label>
                 <div class="lt-setting-desc">
                   {pendingProvider === 'gemini'
-                    ? 'Khuyên dùng gemini-2.5-flash-lite để dịch nhanh và mượt'
+                    ? 'Khuyên dùng gemini-3.5-flash-lite để dịch nhanh, nhiều quota và mượt'
                     : 'Các model mã nguồn mở hoặc thương mại hỗ trợ qua Zen API'}
                 </div>
                 <select
@@ -1182,6 +1202,7 @@ export function ViewerApp() {
                       status={pageStatus[pno]}
                       untranslatedCount={pageUntranslated[pno] || 0}
                       onRetry={retryPage}
+                      visionMarkdown={pageVisionTranslations[pno] || ''}
                     />
                   );
                 }

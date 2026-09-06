@@ -48,11 +48,30 @@ export function wrapInlineMath(text: string): string {
   // 0. Normalize Computer Modern backtick-encoded math symbol `(...) to \ell(...)
   res = res.replace(/`\s*\(/g, '\\ell(');
 
-  // 1. Wrap Greek symbols and LaTeX commands like \Delta z_0, \epsilon_\theta, \ell(...)
+  // 0b. Normalize loss function pair (f, l), (f, 1), (f, \ell) -> $(f, \ell)$
+  res = res.replace(
+    /(?<![\p{L}\p{N}])\(\s*([fgh])\s*,\s*(?:1|l|\\ell)\s*\)(?![\p{L}\p{N}])/gu,
+    '($1, \\ell)',
+  );
+  res = res.replace(
+    /(?<![\p{L}\p{N}])([fgh])\s*,\s*(?:1|l)(?=\s*[.,;!?)]|\s+|$)/gu,
+    '$1, \\ell',
+  );
+
+  // 1. Wrap Greek symbols and LaTeX commands like \Delta z_0, \epsilon_\theta, \ell(...), (f, \ell)
   // P1: bỏ \b sau "}" (không bao giờ match) → dùng (?!\w).
   res = res.replace(
-    /(?:\\Delta\s*[a-zA-Z0-9_]+|\\hat\{[a-zA-Z0-9_]+\}(?:_[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?(?:\^[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?|\\tilde\{[a-zA-Z0-9_]+\}(?:_[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?(?:\^[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?|\\epsilon_\\theta(?:\([^)]*\))?|\\ell(?:\([^)]*\))?|\\epsilon'|\\hat\{\\epsilon\}_t)(?!\w)/gi,
+    /(?:\\Delta\s*[a-zA-Z0-9_]+|\\hat\{[a-zA-Z0-9_]+\}(?:_[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?(?:\^[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?|\\tilde\{[a-zA-Z0-9_]+\}(?:_[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?(?:\^[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?|\\epsilon_\\theta(?:\([^)]*\))?|\\ell(?:\([^)]*\))?|\\epsilon'|\\hat\{\\epsilon\}_t|\(\s*[fgh]\s*,\s*\\ell\s*\)|[fgh]\s*,\s*\\ell)(?!\w)/gi,
     (m) => `$${m}$`,
+  );
+
+  res = res.replace(
+    /(?:\{[\\α\s]*t?\}\s*T\s*t\s*=\s*1|\{\s*\\?alpha_?t?\s*\}\s*T\s*t\s*=\s*1|\{αt\}T\s*t=1|\\?alpha\s*t\s*T\s*t\s*=\s*1|α\s*t\s*T\s*t\s*=\s*1)/gi,
+    () => '${\\{\\alpha_t\\}_{t=1}^T}$',
+  );
+  res = res.replace(
+    /\{([α-ωΑ-Ωa-zA-Z0-9_\\]+)\}\s*([A-Z])\s*([a-z0-9]+=[0-9]+)/g,
+    (_, p1, p2, p3) => '${\\{' + p1 + '\\}_{' + p3 + '}^{' + p2 + '}}$',
   );
 
   // 2. Wrap bracketed sets: {\alpha_t}_{t=1}^T or {a_T}
@@ -93,6 +112,7 @@ export function wrapInlineMath(text: string): string {
       if (math === 'N(0, I)' || math === 'N(0,I)') math = '\\mathcal{N}(0, \\mathbf{I})';
       else if (/^z_?t\s*-\s*1$/.test(math)) math = 'z_{t-1}';
       else if (/^z_?t'?$/.test(math)) math = "z_t'";
+      else if (math.startsWith('S(')) math = math.replace(/[·•]/g, '\\cdot');
       return `$${math}$`;
     },
   );

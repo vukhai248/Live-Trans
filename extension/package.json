@@ -2,7 +2,7 @@
   "name": "live-trans-extension",
   "description": "Live audio/video translation with academic terminology preservation",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.1",
   "type": "module",
   "scripts": {
     "dev": "wxt",

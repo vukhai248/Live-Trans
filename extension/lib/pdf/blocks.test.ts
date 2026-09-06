@@ -386,5 +386,71 @@ describe('PDF text blocks extractor', () => {
     expect(eqTexts).toContain('(1)');
     expect(eqTexts).toContain('(2)');
     expect(eqTexts).toContain('(3)');
+
+    // Ensure inline clause "where z_t-1 = S(...)" is NOT separated into an isolated equation block
+    for (const eq of equations) {
+      expect(eq.text.trim().startsWith('where ')).toBe(false);
+    }
+  });
+
+  it('does not treat inline subordinate clause starting with where/with as standalone formula', () => {
+    const rawItems: RawTextItem[] = [
+      {
+        str: 'we define a function as an abstraction of the sampling method,',
+        transform: [10, 0, 0, 10, 54, 500],
+        width: 250,
+        height: 10,
+      },
+      {
+        str: 'where z_{t-1} = S(z_t, \\epsilon, t).',
+        transform: [10, 0, 0, 10, 54, 485],
+        width: 160,
+        height: 10,
+      },
+    ];
+
+    const blocks = extractTextBlocks(rawItems, 612, 792, 2);
+    // Should be unified into 1 prose paragraph block, NOT split into a formula block
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]!.isFormula).toBeFalsy();
+    expect(blocks[0]!.text).toContain('where z_{t-1} = S(z_t, \\epsilon, t).');
+  });
+
+  it('splits distinct paragraphs with first-line indent into separate blocks', () => {
+    const rawItems: RawTextItem[] = [
+      // Paragraph 1 line 1 (indented)
+      {
+        str: 'First paragraph begins with an indented first line in the column.',
+        transform: [10, 0, 0, 10, 66, 600],
+        width: 240,
+        height: 10,
+      },
+      // Paragraph 1 line 2 (unindented, ends with period)
+      {
+        str: 'And here is the conclusion of the first paragraph.',
+        transform: [10, 0, 0, 10, 54, 585],
+        width: 210,
+        height: 10,
+      },
+      // Paragraph 2 line 1 (indented, starts new sentence)
+      {
+        str: 'Second paragraph begins with another indentation after a period.',
+        transform: [10, 0, 0, 10, 66, 570],
+        width: 240,
+        height: 10,
+      },
+      // Paragraph 2 line 2 (unindented)
+      {
+        str: 'Continuing the second paragraph content seamlessly.',
+        transform: [10, 0, 0, 10, 54, 555],
+        width: 220,
+        height: 10,
+      },
+    ];
+
+    const blocks = extractTextBlocks(rawItems, 612, 792, 2);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]!.text).toContain('First paragraph');
+    expect(blocks[1]!.text).toContain('Second paragraph');
   });
 });

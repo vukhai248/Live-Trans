@@ -6,39 +6,172 @@ import katex from 'katex';
 
 interface InlineKatexProps {
   math: string;
+  displayMode?: boolean;
 }
 
-function InlineKatex({ math }: InlineKatexProps) {
+function InlineKatex({ math, displayMode = false }: InlineKatexProps) {
   const spanRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     if (!spanRef.current) return;
     try {
       katex.render(math, spanRef.current, {
-        displayMode: false,
+        displayMode,
         throwOnError: false,
         strict: false,
       });
     } catch {
       if (spanRef.current) spanRef.current.textContent = math;
     }
-  }, [math]);
+  }, [math, displayMode]);
 
-  return <span ref={spanRef} class="lt-inline-math" />;
+  return <span ref={spanRef} class={displayMode ? 'lt-wb-display-math' : 'lt-inline-math'} />;
 }
 
-function renderFormattedSentence(text: string) {
+function renderFormattedSentence(text: string): any {
   if (!text) return null;
   const withMath = wrapInlineMath(text);
-  const parts = withMath.split(/(\$[^$]+\$)/g);
+  // Matches $$...$$, $...$, **...**, `...`, or *...*
+  const parts = withMath.split(/(\$\$[\s\S]+?\$\$|\$[^$]+?\$|\*\*[^*]+?\*\*|`[^`]+?`|\*[^*]+?\*)/g);
 
   return parts.map((part, idx) => {
+    if (!part) return null;
+    if (part.startsWith('$$') && part.endsWith('$$')) {
+      const math = part.slice(2, -2).trim();
+      return <InlineKatex key={idx} math={math} displayMode={true} />;
+    }
     if (part.startsWith('$') && part.endsWith('$')) {
-      const math = part.slice(1, -1);
-      return <InlineKatex key={idx} math={math} />;
+      const math = part.slice(1, -1).trim();
+      return <InlineKatex key={idx} math={math} displayMode={false} />;
+    }
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={idx}>{renderFormattedSentence(part.slice(2, -2))}</strong>;
+    }
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return <code key={idx} class="lt-code-inline">{part.slice(1, -1)}</code>;
+    }
+    if (part.startsWith('*') && part.endsWith('*')) {
+      return <em key={idx}>{renderFormattedSentence(part.slice(1, -1))}</em>;
     }
     return part;
   });
+}
+
+interface ExtractedEquation {
+  math: string;
+  num?: string;
+}
+
+function extractEquationsFromMarkdown(md: string): { byNum: Map<string, string>; list: ExtractedEquation[] } {
+  const byNum = new Map<string, string>();
+  const list: ExtractedEquation[] = [];
+  if (!md) return { byNum, list };
+
+  // Match $$ ... $$ blocks
+  const displayRegex = /\$\$([\s\S]*?)\$\$/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = displayRegex.exec(md)) !== null) {
+    let content = (match[1] ?? '').trim();
+    let num: string | undefined;
+
+    // Check for \tag{...} inside the formula
+    const tagMatch = content.match(/\\tag\{([^}]+)\}/);
+    if (tagMatch && tagMatch[1]) {
+      num = tagMatch[1].trim();
+      content = content.replace(/\\tag\{[^}]+\}/g, '').trim();
+    } else {
+      // Check for (1) or (2) immediately following the $$ block in markdown
+      const afterSlice = md.slice(match.index + match[0].length, match.index + match[0].length + 40);
+      const numMatch = afterSlice.match(/^\s*(?:\r?\n)?\s*\(([0-9]+(?:\.[0-9]+)?)\)/);
+      if (numMatch && numMatch[1]) {
+        num = numMatch[1];
+      }
+    }
+
+    if (num) {
+      byNum.set(num, content);
+    }
+    list.push({ math: content, num });
+  }
+
+  return { byNum, list };
+}
+
+interface WhiteboardEquationProps {
+  block: TranslatedBlock;
+  pdfDoc: PDFDocumentProxy;
+  pageNumber: number;
+  visionEquations?: { byNum: Map<string, string>; list: ExtractedEquation[] };
+  formulaIndex: number;
+}
+
+function WhiteboardEquation({
+  block,
+  pdfDoc,
+  pageNumber,
+  visionEquations,
+  formulaIndex,
+}: WhiteboardEquationProps) {
+  const rawText = block.text.trim();
+  const numMatch = rawText.match(/\(\s*([0-9]+(?:\.[0-9]+)?)\s*\)$/);
+  const eqNum = numMatch ? numMatch[1] : undefined;
+
+  let latexCandidate: string | null = null;
+  let fromVision = false;
+
+  if (visionEquations) {
+    if (eqNum && visionEquations.byNum.has(eqNum)) {
+      latexCandidate = visionEquations.byNum.get(eqNum)!;
+      fromVision = true;
+    } else if (visionEquations.list[formulaIndex]) {
+      latexCandidate = visionEquations.list[formulaIndex].math;
+      fromVision = true;
+    }
+  }
+
+  // Only consider rawText if it contains well-formed LaTeX commands and NOT broken raw Unicode artifacts (√, □)
+  if (!latexCandidate) {
+    const candidate = (numMatch ? rawText.replace(/\(\s*[0-9]+(?:\.[0-9]+)?\s*\)$/, '') : rawText)
+      .replace(/^(\$\$|\$)/, '')
+      .replace(/(\$\$|\$)$/, '')
+      .trim();
+
+    const hasValidLatex = /\\[a-zA-Z]{2,}/.test(candidate) && !/[√□]/.test(candidate);
+    if (hasValidLatex) {
+      latexCandidate = candidate;
+    }
+  }
+
+  const finalLatex = useMemo(() => {
+    if (!latexCandidate || latexCandidate.length < 2) return null;
+    try {
+      katex.renderToString(latexCandidate, { displayMode: true, throwOnError: true });
+      return latexCandidate;
+    } catch {
+      return null;
+    }
+  }, [latexCandidate]);
+
+  const displayNum = eqNum || (fromVision ? visionEquations?.list[formulaIndex]?.num : undefined);
+
+  if (finalLatex) {
+    return (
+      <div class="lt-wb-component lt-wb-equation-box">
+        <div class="lt-wb-eq-math">
+          <InlineKatex math={finalLatex} displayMode={true} />
+        </div>
+        {displayNum && <span class="lt-wb-eq-num">({displayNum})</span>}
+      </div>
+    );
+  }
+
+  // Fallback: Exact, original, crisp 2x HiDPI PDF snippet! (100% faithful to original paper)
+  return (
+    <div class="lt-wb-component lt-wb-equation">
+      <PdfSnippet pdfDoc={pdfDoc} pageNumber={pageNumber} bbox={block.bbox} alt={`Công thức ${block.text}`} />
+    </div>
+  );
 }
 
 interface PdfSnippetProps {
@@ -132,6 +265,7 @@ export interface WhiteboardPageRendererProps {
   status?: 'loading' | 'done' | 'error';
   untranslatedCount?: number;
   onRetry?: (pageNumber: number) => void;
+  visionMarkdown?: string;
 }
 
 export function WhiteboardPageRenderer({
@@ -145,12 +279,21 @@ export function WhiteboardPageRenderer({
   status,
   untranslatedCount,
   onRetry,
+  visionMarkdown,
 }: WhiteboardPageRendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState<{ width: number; height: number }>({
     width: 612 * scale,
     height: 792 * scale,
   });
+
+  const visionEquations = useMemo(() => {
+    return extractEquationsFromMarkdown(visionMarkdown || '');
+  }, [visionMarkdown]);
+
+  const equationBlocks = useMemo(() => {
+    return blocks.filter((b) => b.isFormula || b.componentType === 'equation');
+  }, [blocks]);
 
   useEffect(() => {
     let active = true;
@@ -299,10 +442,16 @@ export function WhiteboardPageRenderer({
     }
     // 1. Display Equations
     if (b.isFormula || b.componentType === 'equation') {
+      const formulaIndex = equationBlocks.indexOf(b);
       return (
-        <div key={b.id} class="lt-wb-component lt-wb-equation">
-          <PdfSnippet pdfDoc={pdfDoc} pageNumber={pageNumber} bbox={b.bbox} alt={`Công thức ${b.text}`} />
-        </div>
+        <WhiteboardEquation
+          key={b.id}
+          block={b}
+          pdfDoc={pdfDoc}
+          pageNumber={pageNumber}
+          visionEquations={visionEquations}
+          formulaIndex={formulaIndex >= 0 ? formulaIndex : idx}
+        />
       );
     }
 
@@ -432,6 +581,8 @@ export function WhiteboardPageRenderer({
         height: `${Math.round(dimensions.height)}px`,
         minHeight: `${Math.round(dimensions.height)}px`,
         maxHeight: `${Math.round(dimensions.height)}px`,
+        overflowY: 'auto',
+        overflowX: 'hidden',
         flexShrink: 0,
       }}
     >
