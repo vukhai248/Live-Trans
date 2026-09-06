@@ -6,6 +6,8 @@ import { extractTextBlocks } from '@/lib/pdf/blocks';
 import { translatePageBlocks } from '@/lib/pdf/translate';
 import { blocksToMarkdownElements } from '@/lib/pdf/markdown';
 import { WhiteboardPageRenderer } from './WhiteboardPageRenderer';
+import { VisionPageRenderer } from './VisionPageRenderer';
+import { translatePageVision, getCachedVisionTranslation } from '@/lib/pdf/vision-translate';
 import { computeReflowOffsets } from '@/lib/pdf/reflow';
 import type { TextBlock, TranslatedBlock, ViewMode } from '@/lib/pdf/types';
 import {
@@ -31,10 +33,15 @@ export function ViewerApp() {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [scale, setScale] = useState<number>(1.0);
   const [viewMode, setViewMode] = useState<ViewMode>('bilingual');
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
+  const [isSidebarPinned, setIsSidebarPinned] = useState<boolean>(false);
   const [hoveredSentenceId, setHoveredSentenceId] = useState<string | null>(null);
   // Bảng trắng Component là mode mặc định (khắc phục dãn nở văn bản & ghosting).
-  const [readerMode, setReaderMode] = useState<'whiteboard' | 'markdown' | 'overlay'>('whiteboard');
+  const [readerMode, setReaderMode] = useState<'whiteboard' | 'vision' | 'markdown' | 'overlay'>('whiteboard');
+  const [isModeMenuOpen, setIsModeMenuOpen] = useState<boolean>(false);
+  const [isSplitMenuOpen, setIsSplitMenuOpen] = useState<boolean>(false);
+  const [pageVisionTranslations, setPageVisionTranslations] = useState<Record<number, string>>({});
+  const [pageVisionStatus, setPageVisionStatus] = useState<Record<number, 'loading' | 'done' | 'error'>>({});
   const [splitRatio, setSplitRatio] = useState<number>(0.45);
   const isDraggingSplitter = useRef<boolean>(false);
 
@@ -110,6 +117,26 @@ export function ViewerApp() {
     (window as any).__setSplitRatio = (r: number) => setSplitRatio(r);
   }, []);
 
+  // Preload cached vision translations when entering vision mode
+  useEffect(() => {
+    if (readerMode === 'vision' && pdfUrl && numPages > 0) {
+      const initialTrans: Record<number, string> = {};
+      const initialStatus: Record<number, 'done'> = {};
+      const model = settings.pdfModel || 'gemini-2.5-flash';
+      for (let p = 1; p <= numPages; p++) {
+        const cached = getCachedVisionTranslation(pdfUrl, p, model);
+        if (cached) {
+          initialTrans[p] = cached;
+          initialStatus[p] = 'done';
+        }
+      }
+      if (Object.keys(initialTrans).length > 0) {
+        setPageVisionTranslations((prev) => ({ ...initialTrans, ...prev }));
+        setPageVisionStatus((prev) => ({ ...initialStatus, ...prev }));
+      }
+    }
+  }, [readerMode, pdfUrl, numPages, settings.pdfModel]);
+
   // 2. Synchronized scrolling between left and right panels with Page-to-Page alignment
   const handleLeftScroll = () => {
     if (isSyncingScroll.current || viewMode !== 'bilingual') return;
@@ -138,7 +165,7 @@ export function ViewerApp() {
 
     // Align right pane to the exact corresponding page
     const rightPage = right.querySelector<HTMLElement>(
-      `.lt-whiteboard-page[data-page-number="${currentPno}"], .lt-page-wrap[data-page-number="${currentPno}"], .lt-markdown-page[data-page-number="${currentPno}"]`
+      `.lt-whiteboard-page[data-page-number="${currentPno}"], .lt-page-wrap[data-page-number="${currentPno}"], .lt-markdown-page[data-page-number="${currentPno}"], .lt-vision-page[data-page-number="${currentPno}"]`
     );
     if (rightPage) {
       right.scrollTop = rightPage.offsetTop + rightPage.offsetHeight * pageOffsetRatio;
@@ -164,7 +191,7 @@ export function ViewerApp() {
 
     // Detect which page is at the top of the right pane
     const rightPages = right.querySelectorAll<HTMLElement>(
-      '.lt-whiteboard-page, .lt-page-wrap, .lt-markdown-page'
+      '.lt-whiteboard-page, .lt-page-wrap, .lt-markdown-page, .lt-vision-page'
     );
     let currentPno = 1;
     let pageOffsetRatio = 0;
@@ -267,6 +294,84 @@ export function ViewerApp() {
   };
 
   // Thử lại trang lỗi (badge ⚠).
+
+  // Vision AI Translation Queue & Handler (riêng biệt, không nghẽn bởi text translation)
+  const visionQueueRef = useRef<{ active: number; waiting: Array<() => void> }>({
+    active: 0,
+    waiting: [],
+  });
+
+  const runWithVisionSlot = async (fn: () => Promise<void>): Promise<void> => {
+    const q = visionQueueRef.current;
+    if (q.active >= 2) {
+      await new Promise<void>((resolve) => q.waiting.push(resolve));
+    }
+    q.active++;
+    try {
+      await fn();
+    } finally {
+      q.active--;
+      const next = q.waiting.shift();
+      if (next) next();
+    }
+  };
+
+  const visionTokenRef = useRef<Record<number, number>>({});
+  const triggerVisionTranslation = async (pageNumber: number, force = false) => {
+    if (pageNumber < 1 || pageNumber > numPages) return;
+    if (!force && (!pdfDoc || pageVisionStatus[pageNumber])) return;
+    if (!pdfDoc) return;
+
+    // 1. Kiểm tra cache trước — nạp tức thì mà không cần xếp hàng slot mạng
+    if (!force) {
+      const modelToUse = settings.pdfModel || 'gemini-2.5-flash';
+      const candidates = [
+        modelToUse,
+        'gemini-2.5-flash',
+        'gemini-2.0-flash',
+        'gemini-1.5-flash',
+        'gemini-2.5-flash-lite',
+      ];
+      for (const m of candidates) {
+        const cached = getCachedVisionTranslation(pdfUrl, pageNumber, m);
+        if (cached) {
+          setPageVisionTranslations((prev) => ({ ...prev, [pageNumber]: cached }));
+          setPageVisionStatus((prev) => ({ ...prev, [pageNumber]: 'done' }));
+          return;
+        }
+      }
+    }
+
+    const token = (visionTokenRef.current[pageNumber] || 0) + 1;
+    visionTokenRef.current[pageNumber] = token;
+    const alive = () => visionTokenRef.current[pageNumber] === token;
+
+    setPageVisionStatus((prev) => ({ ...prev, [pageNumber]: 'loading' }));
+
+    await runWithVisionSlot(async () => {
+      if (!alive()) return;
+      try {
+        const md = await translatePageVision(pageNumber, pdfDoc, pdfUrl, settings, force);
+        if (!alive()) return;
+        setPageVisionTranslations((prev) => ({ ...prev, [pageNumber]: md }));
+        setPageVisionStatus((prev) => ({ ...prev, [pageNumber]: 'done' }));
+      } catch (err) {
+        if (!alive()) return;
+        console.error(`[Live-Trans Vision] Error translating page ${pageNumber}:`, err);
+        setPageVisionStatus((prev) => ({ ...prev, [pageNumber]: 'error' }));
+      }
+    });
+  };
+
+  const retryVisionPage = (pageNumber: number) => {
+    setPageVisionStatus((prev) => {
+      const next = { ...prev };
+      delete next[pageNumber];
+      return next;
+    });
+    void triggerVisionTranslation(pageNumber, true);
+  };
+
   const retryPage = (pageNumber: number) => {
     setPageStatus((prev) => {
       const next = { ...prev };
@@ -312,6 +417,23 @@ export function ViewerApp() {
 
   // Dịch lại toàn bộ các trang từ đầu với provider/model hiện tại.
   const retranslateAll = () => {
+    if (readerMode === 'vision') {
+      try {
+        const doomed: string[] = [];
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const k = sessionStorage.key(i);
+          if (k && k.startsWith('live_trans_pdf_vision_')) doomed.push(k);
+        }
+        for (const k of doomed) sessionStorage.removeItem(k);
+      } catch {}
+      setPageVisionTranslations({});
+      setPageVisionStatus({});
+      for (let p = 1; p <= numPages; p++) {
+        void triggerVisionTranslation(p, true);
+      }
+      return;
+    }
+
     try {
       const doomed: string[] = [];
       for (let i = 0; i < sessionStorage.length; i++) {
@@ -385,14 +507,15 @@ export function ViewerApp() {
         {/* LEFT: Brand & Document info */}
         <div class="lt-toolbar-group">
           <button
-            class="lt-btn"
-            title={sidebarOpen ? 'Ẩn thanh trang' : 'Hiện thanh trang'}
+            class={`lt-btn lt-sidebar-toggle-btn ${sidebarOpen ? 'active' : ''}`}
+            title={sidebarOpen ? 'Ẩn danh sách trang' : 'Xem danh sách các trang'}
             onClick={() => setSidebarOpen((v) => !v)}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect width="18" height="18" x="3" y="3" rx="2"/>
               <path d="M9 3v18"/>
             </svg>
+            <span>Trang</span>
           </button>
           <div class="lt-brand">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -452,72 +575,163 @@ export function ViewerApp() {
             </button>
           </div>
 
-          {/* Split Ratio Presets (Bilingual mode) */}
+          {/* Split Ratio Dropdown (Bilingual mode) - Click to expand */}
           {viewMode === 'bilingual' && (
-            <div class="lt-segmented-group" title="Tỉ lệ chia màn hình (Gốc : Bảng dịch)">
+            <div class="lt-dropdown-container">
               <button
-                class={`lt-seg-btn ${Math.abs(splitRatio - 0.5) < 0.03 ? 'active' : ''}`}
-                onClick={() => setSplitRatio(0.5)}
-                title="Chia đều 50:50"
+                class="lt-btn lt-dropdown-btn"
+                onClick={() => {
+                  setIsSplitMenuOpen(!isSplitMenuOpen);
+                  setIsModeMenuOpen(false);
+                }}
+                title="Chọn tỉ lệ chia màn hình"
               >
-                50:50
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect width="18" height="18" x="3" y="3" rx="2"/>
+                  <path d="M12 3v18"/>
+                </svg>
+                <span>{Math.abs(splitRatio - 0.35) < 0.03 ? '35:65' : Math.abs(splitRatio - 0.5) < 0.03 ? '50:50' : '30:70'}</span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
               </button>
-              <button
-                class={`lt-seg-btn ${Math.abs(splitRatio - 0.35) < 0.03 ? 'active' : ''}`}
-                onClick={() => setSplitRatio(0.35)}
-                title="Mở rộng 35:65 (Khuyên dùng cho tiếng Việt)"
-              >
-                35:65
-              </button>
-              <button
-                class={`lt-seg-btn ${Math.abs(splitRatio - 0.3) < 0.03 ? 'active' : ''}`}
-                onClick={() => setSplitRatio(0.3)}
-                title="Tập trung bản dịch 30:70"
-              >
-                30:70
-              </button>
+              {isSplitMenuOpen && (
+                <div class="lt-dropdown-menu lt-split-menu" onClick={() => setIsSplitMenuOpen(false)}>
+                  <div class={`lt-dropdown-item ${Math.abs(splitRatio - 0.35) < 0.03 ? 'active' : ''}`} onClick={() => setSplitRatio(0.35)}>
+                    <div class="lt-dropdown-item-title"><strong>35:65 (Khuyên dùng)</strong></div>
+                    <div class="lt-dropdown-item-desc">Tối ưu cho tiếng Việt, chống tràn chữ</div>
+                  </div>
+                  <div class={`lt-dropdown-item ${Math.abs(splitRatio - 0.5) < 0.03 ? 'active' : ''}`} onClick={() => setSplitRatio(0.5)}>
+                    <div class="lt-dropdown-item-title"><strong>50:50 (Chia đều)</strong></div>
+                    <div class="lt-dropdown-item-desc">Cân bằng hai khung đọc</div>
+                  </div>
+                  <div class={`lt-dropdown-item ${Math.abs(splitRatio - 0.3) < 0.03 ? 'active' : ''}`} onClick={() => setSplitRatio(0.3)}>
+                    <div class="lt-dropdown-item-title"><strong>30:70 (Rộng nhất)</strong></div>
+                    <div class="lt-dropdown-item-desc">Dành tối đa không gian cho bản dịch</div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Segmented Reader Style */}
-          <div class="lt-segmented-group" title="Phong cách hiển thị">
+          {/* Mode Selector Dropdown - Click to expand (Không dàn trải gây tốn diện tích) */}
+          <div class="lt-dropdown-container">
             <button
-              class={`lt-seg-btn ${readerMode === 'whiteboard' ? 'active' : ''}`}
-              onClick={() => setReaderMode('whiteboard')}
-              title="Bảng trắng Canvas độc lập (Giữ nguyên tọa độ & công thức)"
+              class="lt-btn lt-dropdown-btn lt-mode-select-btn"
+              onClick={() => {
+                setIsModeMenuOpen(!isModeMenuOpen);
+                setIsSplitMenuOpen(false);
+              }}
+              title="Chọn chế độ hiển thị bản dịch"
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect width="7" height="7" x="3" y="3" rx="1"/>
-                <rect width="7" height="7" x="14" y="3" rx="1"/>
-                <rect width="7" height="7" x="14" y="14" rx="1"/>
-                <rect width="7" height="7" x="3" y="14" rx="1"/>
+              {readerMode === 'whiteboard' && (
+                <>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect width="7" height="7" x="3" y="3" rx="1"/>
+                    <rect width="7" height="7" x="14" y="3" rx="1"/>
+                    <rect width="7" height="7" x="14" y="14" rx="1"/>
+                    <rect width="7" height="7" x="3" y="14" rx="1"/>
+                  </svg>
+                  <span>Bảng trắng</span>
+                </>
+              )}
+              {readerMode === 'vision' && (
+                <>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                  <span style={{ color: '#c084fc', fontWeight: 600 }}>Vision AI (LaTeX)</span>
+                </>
+              )}
+              {readerMode === 'markdown' && (
+                <>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="21" y1="6" x2="3" y2="6"/>
+                    <line x1="15" y1="12" x2="3" y2="12"/>
+                    <line x1="17" y1="18" x2="3" y2="18"/>
+                  </svg>
+                  <span>Markdown</span>
+                </>
+              )}
+              {readerMode === 'overlay' && (
+                <>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+                    <polyline points="2 17 12 22 22 17"/>
+                    <polyline points="2 12 12 17 22 12"/>
+                  </svg>
+                  <span>Overlay</span>
+                </>
+              )}
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style={{ opacity: 0.7 }}>
+                <polyline points="6 9 12 15 18 9"/>
               </svg>
-              Bảng trắng
             </button>
-            <button
-              class={`lt-seg-btn ${readerMode === 'overlay' ? 'active' : ''}`}
-              onClick={() => setReaderMode('overlay')}
-              title="Đè lớp chữ lên PDF gốc"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polygon points="12 2 2 7 12 12 22 7 12 2"/>
-                <polyline points="2 17 12 22 22 17"/>
-                <polyline points="2 12 12 17 22 12"/>
-              </svg>
-              Overlay
-            </button>
-            <button
-              class={`lt-seg-btn ${readerMode === 'markdown' ? 'active' : ''}`}
-              onClick={() => setReaderMode('markdown')}
-              title="Dòng chảy tài liệu Markdown"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="21" y1="6" x2="3" y2="6"/>
-                <line x1="15" y1="12" x2="3" y2="12"/>
-                <line x1="17" y1="18" x2="3" y2="18"/>
-              </svg>
-              Markdown
-            </button>
+
+            {isModeMenuOpen && (
+              <div class="lt-dropdown-menu lt-mode-menu" onClick={() => setIsModeMenuOpen(false)}>
+                <div
+                  class={`lt-dropdown-item ${readerMode === 'whiteboard' ? 'active' : ''}`}
+                  onClick={() => setReaderMode('whiteboard')}
+                >
+                  <div class="lt-dropdown-item-title">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2">
+                      <rect width="7" height="7" x="3" y="3" rx="1"/>
+                      <rect width="7" height="7" x="14" y="3" rx="1"/>
+                      <rect width="7" height="7" x="14" y="14" rx="1"/>
+                      <rect width="7" height="7" x="3" y="14" rx="1"/>
+                    </svg>
+                    <strong>Bảng trắng Component (Mặc định)</strong>
+                  </div>
+                  <div class="lt-dropdown-item-desc">Bảo toàn vị trí và tỉ lệ tọa độ paper, từng component độc lập, hỗ trợ kéo thả.</div>
+                </div>
+
+                <div
+                  class={`lt-dropdown-item ${readerMode === 'vision' ? 'active' : ''}`}
+                  onClick={() => setReaderMode('vision')}
+                >
+                  <div class="lt-dropdown-item-title">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2">
+                      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                    <strong style={{ color: '#c084fc' }}>Vision AI (Thị giác Đa phương thức)</strong>
+                  </div>
+                  <div class="lt-dropdown-item-desc">Chụp ảnh trang gửi Gemini 2.5 Flash, công thức KaTeX & Markdown học thuật siêu chuẩn.</div>
+                </div>
+
+                <div
+                  class={`lt-dropdown-item ${readerMode === 'markdown' ? 'active' : ''}`}
+                  onClick={() => setReaderMode('markdown')}
+                >
+                  <div class="lt-dropdown-item-title">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="21" y1="6" x2="3" y2="6"/>
+                      <line x1="15" y1="12" x2="3" y2="12"/>
+                      <line x1="17" y1="18" x2="3" y2="18"/>
+                    </svg>
+                    <strong>Markdown Dòng chảy</strong>
+                  </div>
+                  <div class="lt-dropdown-item-desc">Tài liệu đọc liên tục, thân thiện với màn hình nhỏ.</div>
+                </div>
+
+                <div
+                  class={`lt-dropdown-item ${readerMode === 'overlay' ? 'active' : ''}`}
+                  onClick={() => setReaderMode('overlay')}
+                >
+                  <div class="lt-dropdown-item-title">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+                      <polyline points="2 17 12 22 22 17"/>
+                      <polyline points="2 12 12 17 22 12"/>
+                    </svg>
+                    <strong>Overlay Đè chữ</strong>
+                  </div>
+                  <div class="lt-dropdown-item-desc">Lớp chữ dịch đè trực tiếp lên mặt trang PDF gốc.</div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* PAGE NAVIGATOR */}
@@ -763,21 +977,101 @@ export function ViewerApp() {
 
       {/* MAIN CONTENT AREA */}
       <div class="lt-main">
-        {/* SIDEBAR THUMBNAILS */}
-        <aside class={`lt-sidebar ${sidebarOpen ? '' : 'collapsed'}`}>
-          {Array.from({ length: numPages }).map((_, idx) => {
-            const pno = idx + 1;
-            return (
-              <div
-                key={pno}
-                class={`lt-thumb-item ${currentPage === pno ? 'active' : ''}`}
-                onClick={() => scrollToPage(pno)}
-              >
-                <div class="lt-thumb-number">Trang {pno}</div>
+        {/* CLICK-TO-EXPAND SIDEBAR DRAWER (Chỉ mở khi bấm nút Trang, không chiếm diện tích) */}
+        <div class={`lt-sidebar-drawer ${sidebarOpen || isSidebarPinned ? 'open' : ''}`}>
+          <aside class={`lt-sidebar ${isSidebarPinned ? 'pinned' : ''}`}>
+            {/* QUICK NAV HEADER: Trang 1, Trang cuối, Ghim & Đóng */}
+            <div class="lt-drawer-header">
+              <div class="lt-drawer-top-row">
+                <div class="lt-drawer-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
+                    <path d="M6 6h10"/>
+                    <path d="M6 10h10"/>
+                  </svg>
+                  Danh sách trang
+                </div>
+                <div class="lt-drawer-header-actions">
+                  <button
+                    class={`lt-drawer-pin-btn ${isSidebarPinned ? 'active' : ''}`}
+                    onClick={() => setIsSidebarPinned(!isSidebarPinned)}
+                    title={isSidebarPinned ? 'Bỏ ghim' : 'Ghim thanh bên'}
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <line x1="12" y1="17" x2="12" y2="22"/>
+                      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a1 1 0 0 0 0-2H8a1 1 0 0 0 0 2h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/>
+                    </svg>
+                    {isSidebarPinned ? 'Đã ghim' : 'Ghim'}
+                  </button>
+                  <button
+                    class="lt-drawer-close-btn"
+                    onClick={() => {
+                      setSidebarOpen(false);
+                      setIsSidebarPinned(false);
+                    }}
+                    title="Đóng thanh trang"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"/>
+                      <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                  </button>
+                </div>
               </div>
-            );
-          })}
-        </aside>
+
+              {/* QUICK JUMP: TRANG 1 & TRANG CUỐI */}
+              <div class="lt-drawer-quick-nav">
+                <button
+                  class="lt-drawer-quick-btn"
+                  onClick={() => scrollToPage(1)}
+                  title="Nhảy nhanh về Trang đầu (Trang 1)"
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="11 17 6 12 11 7"/>
+                    <polyline points="18 17 13 12 18 7"/>
+                  </svg>
+                  Trang 1
+                </button>
+                <button
+                  class="lt-drawer-quick-btn"
+                  onClick={() => scrollToPage(numPages)}
+                  title={`Nhảy nhanh tới Trang cuối (Trang ${numPages})`}
+                >
+                  Trang {numPages || 'cuối'}
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="13 17 18 12 13 7"/>
+                    <polyline points="6 17 11 12 6 7"/>
+                  </svg>
+                </button>
+              </div>
+
+              <div class="lt-drawer-page-stat">
+                Đang xem: <strong>Trang {currentPage}</strong> / {numPages}
+              </div>
+            </div>
+
+            {/* PAGE THUMBNAILS LIST */}
+            {Array.from({ length: numPages }).map((_, idx) => {
+              const pno = idx + 1;
+              const status = pageStatus[pno];
+              return (
+                <div
+                  key={pno}
+                  class={`lt-thumb-item ${currentPage === pno ? 'active' : ''}`}
+                  onClick={() => scrollToPage(pno)}
+                >
+                  <div class="lt-thumb-number">Trang {pno}</div>
+                  {status === 'done' && (
+                    <span style={{ fontSize: '10px', color: '#10b981' }}>Đã dịch ✓</span>
+                  )}
+                  {status === 'loading' && (
+                    <span style={{ fontSize: '10px', color: '#38bdf8' }}>Đang dịch...</span>
+                  )}
+                </div>
+              );
+            })}
+          </aside>
+        </div>
 
         {/* WORKSPACE PANELS */}
         <main class="lt-workspace">
@@ -862,6 +1156,18 @@ export function ViewerApp() {
             >
               {Array.from({ length: numPages }).map((_, idx) => {
                 const pno = idx + 1;
+                if (readerMode === 'vision') {
+                  return (
+                    <VisionPageRenderer
+                      key={pno}
+                      pageNumber={pno}
+                      markdownText={pageVisionTranslations[pno] || ''}
+                      status={pageVisionStatus[pno] || 'loading'}
+                      onVisible={triggerVisionTranslation}
+                      onRetry={retryVisionPage}
+                    />
+                  );
+                }
                 if (readerMode === 'whiteboard') {
                   return (
                     <WhiteboardPageRenderer

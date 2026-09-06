@@ -304,3 +304,23 @@ Gateway mode + auto-detect `/health`; token queue; retry/backoff 429/5xx; export
 ### Dự án mở rộng tham khảo
 30. [BabelDOC](https://github.com/funstory-ai/BabelDOC) · [pdf2zh](https://github.com/PDFMathTranslate/PDFMathTranslate) — phase PDF tương lai
 31. [LiveCaption](https://github.com/begin0808/LiveCaption) · [kami-subs](https://github.com/MohammdKopa/kami-subs) · [videoTranslatorExtenstion](https://github.com/xignoe/videoTranslatorExtenstion) · [multi-subs-yt](https://github.com/garywill/multi-subs-yt)
+
+---
+
+## 12. Cập nhật v0.2: Định hướng VLM (Vision AI) + Bảng trắng Component
+
+> **Kết luận thực nghiệm (09/2026)**: Phương pháp tiếp cận bằng **VLM (Multimodal Vision - Gemini 2.5 Flash / OpenCode Zen)** là **hướng đi tối ưu nhất** cho bài toán dịch tài liệu khoa học / paper PDF.
+
+### 12.1. Đánh giá thực nghiệm so sánh
+- **Bóc tách text thô từ PDF font truyền thống**: Thường xuyên gặp lỗi font toán học TeX OML (sinh ra ký tự lạ, ô vuông $\square$, mất ký tự Hy Lạp như $\epsilon, \alpha, \lambda$), nuốt công thức nội dòng ($inline$), dính caption hình vẽ vào đoạn văn thường, và vỡ bố cục khi văn bản tiếng Việt dãn nở 30–40% so với tiếng Anh.
+- **Dịch bằng mô hình thị giác VLM (Vision AI)**: Render trang PDF thành ảnh chất lượng cao và đưa trực tiếp vào mô hình VLM:
+  + Công thức toán học (inline & display equations) được khôi phục thành mã LaTeX chuẩn 100% ($\hat{\epsilon}_t$, $\epsilon' \sim \mathcal{N}(0, \mathbf{I})$, phương trình căn số căn bậc hai).
+  + Khắc phục triệt để ký tự rác tofu $\square$.
+  + Ngữ cảnh và văn phong dịch học thuật liền mạch, chính xác.
+
+### 12.2. Mục tiêu kiến trúc tiếp theo: Bảng trắng kết hợp VLM (Markdown & LaTeX)
+- **Bảo toàn bố cục & hình ảnh paper gốc**: Kế thừa toàn bộ thế mạnh của chế độ Bảng trắng Component (vị trí tọa độ từng đoạn, tiêu đề, tác giả, 2 cột song song, ảnh cắt từ PDF gốc được nhúng nguyên vẹn tại đúng tọa độ).
+- **Nội dung bên trong từng khối là Markdown + KaTeX**:
+  + Thay vì chỉ hiển thị text thuần, mỗi khối component sẽ hiển thị Markdown và render công thức LaTeX bằng KaTeX.
+  + Từng khối component hoạt động độc lập, có thanh cuộn riêng (scroll container) khi văn bản tiếng Việt dài hơn khung gốc, giúp người dùng cuộn xem trọn vẹn mà không che lấp hay đè lên các khối component bên dưới.
+

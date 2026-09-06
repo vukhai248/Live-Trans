@@ -34,6 +34,28 @@ interface LineItem {
 }
 
 /**
+ * Maps TeX Math OML encoded control characters (0x0B-0x21) to standard Greek/math unicode
+ * and cleans unprintable control characters to prevent tofu square boxes (□).
+ */
+export function sanitizeTeXMathCharacters(text: string): string {
+  if (!text) return '';
+  const omlMap: Record<number, string> = {
+    0x0b: 'α', 0x0c: 'β', 0x0d: 'γ', 0x0e: 'δ',
+    0x0f: 'ϵ', 0x10: 'ζ', 0x11: 'η', 0x12: 'θ',
+    0x13: 'ι', 0x14: 'κ', 0x15: 'λ', 0x16: 'μ',
+    0x17: 'ν', 0x18: 'ξ', 0x19: 'π', 0x1a: 'ρ',
+    0x1b: 'σ', 0x1c: 'τ', 0x1d: 'υ', 0x1e: 'ϕ',
+    0x1f: 'χ',
+  };
+  let s = text.replace(/[\u000b-\u001f]/g, (ch) => omlMap[ch.charCodeAt(0)] || '');
+  // Handle combined hat with epsilon: ˆϵ, ϵˆ, ^ϵ, ˆ\u000f
+  s = s.replace(/(?:[ˆ^]\s*ϵ|ϵ\s*[ˆ^])/g, 'ϵ̂');
+  // Strip control chars except newline, tab, carriage return
+  s = s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffd]/g, '');
+  return s;
+}
+
+/**
  * Normalizes raw PDF.js TextItems into top-left coordinate space (scale = 1.0).
  * Filters out rotated margin watermarks (e.g. "arXiv:2302.07121v1 [cs.CV] 14 Feb 2023").
  */
@@ -45,7 +67,8 @@ export function normalizeTextItems(
   const result: NormalizedItem[] = [];
 
   for (const item of items) {
-    const text = (item.str || '').trim();
+    const rawStr = sanitizeTeXMathCharacters(item.str || '');
+    const text = rawStr.trim();
     if (!text) continue;
 
     // 0. Filter out arXiv stamps / watermarks unconditionally (Ảnh 4 & 5)
@@ -83,7 +106,7 @@ export function normalizeTextItems(
     );
 
     result.push({
-      str: item.str,
+      str: rawStr,
       x,
       y,
       w,
@@ -469,9 +492,20 @@ export function splitTextIntoSentences(text: string): string[] {
   return sentences.length > 0 ? sentences : [clean];
 }
 
+function isCaptionStartLine(text: string): boolean {
+  return /^(figure|table|fig\.)\s+\d+[:.]/i.test(text.trim());
+}
+
+function isReferenceStartLine(text: string): boolean {
+  const t = text.trim();
+  if (/^\[\d+\]\s+[A-Z]/.test(t)) return true;
+  if (/^[A-Z][a-zA-Z'\-]+,\s+[A-Z]\./.test(t)) return true;
+  return false;
+}
+
 /**
  * Groups lines into coherent text blocks / paragraphs.
- * Strictly isolates multi-line fraction equations, algorithm boxes, headings, and footnotes.
+ * Strictly isolates multi-line fraction equations, algorithm boxes, headings, figure captions, references, and footnotes.
  */
 export function groupIntoBlocks(lines: LineItem[], pageNumber: number): TextBlock[] {
   const first = lines[0];
@@ -482,20 +516,43 @@ export function groupIntoBlocks(lines: LineItem[], pageNumber: number): TextBloc
 
   let currentBlockLines: LineItem[] = [first];
   let inAlgorithm = isAlgorithmLine(first.text);
+  let inCaption = isCaptionStartLine(first.text);
+  let inReferences = false;
 
   for (let i = 1; i < lines.length; i++) {
     const prev = currentBlockLines[currentBlockLines.length - 1];
     const curr = lines[i];
     if (!prev || !curr) continue;
 
+    // References section detection
+    if (/^(references|tài liệu tham khảo)\b/i.test(curr.text.trim())) {
+      inReferences = true;
+    } else if (inReferences && /^\d+\.\s+[A-Z]/.test(curr.text.trim())) {
+      // Numerical section heading exits references (e.g. "6. Appendix")
+      inReferences = false;
+    }
+
     // Algorithm box start: flush prior text block and begin isolated algorithm block
     if (/^Algorithm\s+\d+/i.test(curr.text)) {
       if (currentBlockLines.length > 0) {
-        const b = createBlock(currentBlockLines, pageNumber, blockIndex++);
+        const b = createBlock(currentBlockLines, pageNumber, blockIndex++, inReferences);
         if (b) blocks.push(b);
       }
       currentBlockLines = [curr];
       inAlgorithm = true;
+      inCaption = false;
+      continue;
+    }
+
+    // Figure caption start: flush prior text block and begin isolated caption block
+    if (isCaptionStartLine(curr.text)) {
+      if (currentBlockLines.length > 0) {
+        const b = createBlock(currentBlockLines, pageNumber, blockIndex++, inReferences);
+        if (b) blocks.push(b);
+      }
+      currentBlockLines = [curr];
+      inCaption = true;
+      inAlgorithm = false;
       continue;
     }
 
@@ -530,18 +587,51 @@ export function groupIntoBlocks(lines: LineItem[], pageNumber: number): TextBloc
 
     if (inAlgorithm) {
       // While inside an algorithm box:
-      // Inside an algorithm lineSpacing <= 6pt. A gap > 14pt or an "end for" followed by prose terminates the box.
       const isBoxEnded =
         !isSameCol ||
         lineSpacing > 14 ||
         (prev.text.toLowerCase().includes('end for') && !isAlgorithmLine(curr.text)) ||
         isCurrHeading ||
-        isCurrFootnote;
+        isCurrFootnote ||
+        isCaptionStartLine(curr.text);
       if (isBoxEnded) {
         inAlgorithm = false;
         isConsecutive = false;
       } else {
         isConsecutive = true;
+      }
+    } else if (inCaption) {
+      // While inside a figure caption: NEVER leak normal body prose into caption
+      const prevTrimmed = prev.text.trim();
+      const prevEnded = prevTrimmed.endsWith('.') || prevTrimmed.endsWith(':');
+      const isParagraphStart =
+        prevEnded &&
+        (lineSpacing > Math.max(prev.h, curr.h) * 1.05 ||
+          curr.x > prev.x + 6 ||
+          /^(We|The|In|For|To|Our|However|Although|Finally|Moreover|Furthermore|OpenAI|Stable|CLIP|Diffusion|Specifically|Empirically)\b/.test(curr.text.trim()));
+
+      const isCaptionEnded =
+        !isSameCol ||
+        lineSpacing > 12 ||
+        isCurrHeading ||
+        isCurrAlgo ||
+        isCurrFormula ||
+        isCurrFootnote ||
+        isCaptionStartLine(curr.text) ||
+        isParagraphStart;
+
+      if (isCaptionEnded) {
+        inCaption = false;
+        isConsecutive = false;
+      } else {
+        isConsecutive = true;
+      }
+    } else if (inReferences) {
+      // Inside references section: each citation starts with author / [num]
+      if (isReferenceStartLine(curr.text)) {
+        isConsecutive = false;
+      } else {
+        isConsecutive = isSameCol && !isCurrHeading && lineSpacing >= -4 && lineSpacing <= 14;
       }
     } else {
       const isAlgoBreak = isPrevAlgo !== isCurrAlgo;
@@ -567,7 +657,7 @@ export function groupIntoBlocks(lines: LineItem[], pageNumber: number): TextBloc
     if (isConsecutive) {
       currentBlockLines.push(curr);
     } else {
-      const b = createBlock(currentBlockLines, pageNumber, blockIndex++);
+      const b = createBlock(currentBlockLines, pageNumber, blockIndex++, inReferences);
       if (b) {
         blocks.push(b);
       }
@@ -576,7 +666,7 @@ export function groupIntoBlocks(lines: LineItem[], pageNumber: number): TextBloc
   }
 
   if (currentBlockLines.length > 0) {
-    const b = createBlock(currentBlockLines, pageNumber, blockIndex);
+    const b = createBlock(currentBlockLines, pageNumber, blockIndex, inReferences);
     if (b) blocks.push(b);
   }
 
@@ -604,6 +694,7 @@ function createBlock(
   lines: LineItem[],
   pageNumber: number,
   blockIdx: number,
+  isReference: boolean = false,
 ): TextBlock | null {
   const first = lines[0];
   if (!first) return null;
@@ -638,9 +729,9 @@ function createBlock(
   const isHeading = isStandaloneHeading(text, boldCount > lines.length / 2);
   const isFootnote = isFootnoteItem(minY, totalFontSize / lines.length, text);
 
-  // Standalone headings, headers, algorithm lines, and formulas must NOT be broken into sub-sentences
+  // Standalone headings, headers, algorithm lines, references, and formulas must NOT be broken into sub-sentences
   const rawSentences =
-    isFormula || isHeader || isHeading || isAlgorithm
+    isFormula || isHeader || isHeading || isAlgorithm || isReference
       ? [text]
       : splitTextIntoSentences(text);
 
@@ -669,6 +760,8 @@ function createBlock(
     componentType = 'equation';
   } else if (isAlgorithm) {
     componentType = 'algorithm';
+  } else if (isReference && !isHeading) {
+    componentType = 'reference';
   } else if (pageNumber === 1 && blockIdx === 0 && first.col === 0 && avgFontSize >= 13) {
     componentType = 'title';
   } else if (text.trim().toLowerCase() === 'abstract' || text.toLowerCase().startsWith('abstract')) {

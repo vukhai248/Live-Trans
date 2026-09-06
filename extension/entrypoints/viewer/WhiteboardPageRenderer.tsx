@@ -280,7 +280,11 @@ export function WhiteboardPageRenderer({
     });
   };
 
-  const renderComponentBlock = (b: TranslatedBlock) => {
+  const renderComponentBlock = (
+    b: TranslatedBlock,
+    idx: number = 0,
+    allInCol: TranslatedBlock[] = [],
+  ) => {
     // 0. Abstract in Column
     if (b.componentType === 'abstract' || /^(abstract|tóm tắt)\b/i.test(b.text.trim())) {
       if (b.text.trim().length <= 15 && /^(abstract|tóm tắt)$/i.test(b.text.trim())) {
@@ -325,6 +329,17 @@ export function WhiteboardPageRenderer({
       );
     }
 
+    // Filter out sub-figure labels that appear before a top-of-column figure
+    // (their text/graphics are captured directly inside the unified figure snippet)
+    const hasTopFigureAfter = allInCol.slice(idx + 1).some(
+      (nextB) =>
+        (nextB.componentType === 'figure_caption' || /^(figure|table)\s+\d+[:.]/i.test(nextB.text.trim())) &&
+        allInCol.slice(0, allInCol.indexOf(nextB)).every((prior) => !prior.isHeading && prior.text.length < 160)
+    );
+    if (hasTopFigureAfter && !b.isHeading && b.text.length < 160) {
+      return null;
+    }
+
     // 3. Section Heading
     if (b.isHeading || b.componentType === 'heading') {
       return (
@@ -336,15 +351,42 @@ export function WhiteboardPageRenderer({
 
     // 4. Figure Caption & Image Area
     if (b.componentType === 'figure_caption' || /^(figure|table)\s+\d+[:.]/i.test(b.text.trim())) {
-      // In academic papers, the figure graphic sits right above its caption
-      // Estimate figure image bounding box dynamically to avoid cutting top images
       const captionBbox = b.bbox;
-      const figTop = Math.max(140, Math.min(captionBbox[1] - 460, 190));
-      const figHeight = Math.max(120, captionBbox[1] - figTop);
+      const colTop = pageNumber === 1 ? 165 : 48;
+
+      // Check if all preceding blocks in this column are sub-figure labels
+      const isTopFigure = allInCol
+        .slice(0, idx)
+        .every((prior) => !prior.isHeading && prior.text.length < 160);
+
+      const prevBlock = idx > 0 ? allInCol[idx - 1] : null;
+
+      // Determine top boundary of graphic dynamically based on previous block or column top
+      let figTop = colTop;
+      if (!isTopFigure && prevBlock) {
+        figTop = Math.max(colTop, prevBlock.bbox[1] + prevBlock.bbox[3] + 4);
+      }
+
+      // Determine horizontal position by column to prevent clipping or leaking
+      let figLeft = b.bbox[0];
+      let figWidth = b.bbox[2];
+      if (b.col === 1) {
+        figLeft = 45;
+        figWidth = 245;
+      } else if (b.col === 2) {
+        figLeft = 310;
+        figWidth = 245;
+      } else {
+        figLeft = 45;
+        figWidth = Math.max(dimensions.width - 90, 510);
+      }
+
+      // Height of graphic strictly above caption
+      const figHeight = Math.max(60, captionBbox[1] - 4 - figTop);
       const figureImageBbox: [number, number, number, number] = [
-        Math.max(20, captionBbox[0] - 25),
+        figLeft,
         figTop,
-        Math.max(captionBbox[2] + 40, 260),
+        figWidth,
         figHeight,
       ];
 
@@ -361,7 +403,16 @@ export function WhiteboardPageRenderer({
       );
     }
 
-    // 5. Normal Body Paragraph
+    // 5. Reference bibliography item
+    if (b.componentType === 'reference') {
+      return (
+        <div key={b.id} class="lt-wb-component lt-wb-reference-item">
+          {renderSentences(b)}
+        </div>
+      );
+    }
+
+    // 6. Normal Body Paragraph
     return (
       <p key={b.id} class="lt-wb-component lt-wb-paragraph">
         {renderSentences(b)}
@@ -463,17 +514,17 @@ export function WhiteboardPageRenderer({
       {/* FULL-WIDTH TOP BLOCKS (if any) */}
       {fullWidthBlocks.length > 0 && (
         <div class="lt-wb-full-width">
-          {fullWidthBlocks.map(renderComponentBlock)}
+          {fullWidthBlocks.map((b, idx) => renderComponentBlock(b, idx, fullWidthBlocks))}
         </div>
       )}
 
       {/* TWO-COLUMN ACADEMIC BODY */}
       <div class="lt-wb-columns-wrap">
         <div class="lt-wb-col lt-wb-col-left">
-          {col1Blocks.map(renderComponentBlock)}
+          {col1Blocks.map((b, idx) => renderComponentBlock(b, idx, col1Blocks))}
         </div>
         <div class="lt-wb-col lt-wb-col-right">
-          {col2Blocks.map(renderComponentBlock)}
+          {col2Blocks.map((b, idx) => renderComponentBlock(b, idx, col2Blocks))}
         </div>
       </div>
 

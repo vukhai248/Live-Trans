@@ -16,6 +16,7 @@ export type ComponentType =
   | 'equation'
   | 'algorithm'
   | 'figure_caption'
+  | 'reference'
   | 'footnote'
   | 'header'
   | 'footer';

@@ -31,13 +31,27 @@ export function wrapInlineMath(text: string): string {
     return `⟦PROT_${idx}⟧`;
   });
 
+  // Normalize TeX Math control characters (0x0B-0x21) and tofu boxes (□)
+  const omlMap: Record<number, string> = {
+    0x0b: '\\alpha', 0x0c: '\\beta', 0x0d: '\\gamma', 0x0e: '\\delta',
+    0x0f: '\\epsilon', 0x10: '\\zeta', 0x11: '\\eta', 0x12: '\\theta',
+    0x13: '\\iota', 0x14: '\\kappa', 0x15: '\\lambda', 0x16: '\\mu',
+    0x17: '\\nu', 0x18: '\\xi', 0x19: '\\pi', 0x1a: '\\rho',
+    0x1b: '\\sigma', 0x1c: '\\tau', 0x1d: '\\upsilon', 0x1e: '\\phi',
+    0x1f: '\\chi',
+  };
+  res = res.replace(/[\u000b-\u001f]/g, (ch) => omlMap[ch.charCodeAt(0)] || ch);
+  res = res.replace(/(?:[ˆ^]\s*\\epsilon|\\epsilon\s*[ˆ^]|□\s*[\^ˆ]?'\s*t|□\s*['’]\s*t)/g, '\\hat{\\epsilon}_t');
+  res = res.replace(/(?:\\epsilon\s*['’]|□\s*['’])/g, "\\epsilon'");
+  res = res.replace(/□/g, '');
+
   // 0. Normalize Computer Modern backtick-encoded math symbol `(...) to \ell(...)
   res = res.replace(/`\s*\(/g, '\\ell(');
 
   // 1. Wrap Greek symbols and LaTeX commands like \Delta z_0, \epsilon_\theta, \ell(...)
   // P1: bỏ \b sau "}" (không bao giờ match) → dùng (?!\w).
   res = res.replace(
-    /(?:\\Delta\s*[a-zA-Z0-9_]+|\\hat\{[a-zA-Z0-9_]+\}(?:_[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?(?:\^[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?|\\tilde\{[a-zA-Z0-9_]+\}(?:_[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?(?:\^[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?|\\epsilon_\\theta(?:\([^)]*\))?|\\ell(?:\([^)]*\))?)(?!\w)/gi,
+    /(?:\\Delta\s*[a-zA-Z0-9_]+|\\hat\{[a-zA-Z0-9_]+\}(?:_[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?(?:\^[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?|\\tilde\{[a-zA-Z0-9_]+\}(?:_[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?(?:\^[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?|\\epsilon_\\theta(?:\([^)]*\))?|\\ell(?:\([^)]*\))?|\\epsilon'|\\hat\{\\epsilon\}_t)(?!\w)/gi,
     (m) => `$${m}$`,
   );
 
@@ -73,8 +87,14 @@ export function wrapInlineMath(text: string): string {
     return `⟦PROT_${idx}⟧`;
   });
   res = res.replace(
-    /(?<![\p{L}\p{N}])(?:z_0|z0|z_t|zt|x_0|x0|x_t|xt|y_n|w_t|z_\{t-1\}|z_\{0\}|x_\{t\}|x_\{0\}|D\^[ST]|q\([^)]*\)|p\([^)]*\))(?![\p{L}\p{N}])/gu,
-    (m) => `$${m}$`,
+    /(?<![\p{L}\p{N}])(?:z_0|z0|z_t|zt|x_0|x0|x_t|xt|y_n|w_t|z_\{t-1\}|z_\{0\}|x_\{t\}|x_\{0\}|D\^[ST]|q\([^)]*\)|p\([^)]*\)|zt\s*-\s*1|z_t\s*-\s*1|zt'|z_t'|z_t\^'|N\(0,\s*I\)|S\([^)]+\))(?![\p{L}\p{N}])/gu,
+    (m) => {
+      let math = m;
+      if (math === 'N(0, I)' || math === 'N(0,I)') math = '\\mathcal{N}(0, \\mathbf{I})';
+      else if (/^z_?t\s*-\s*1$/.test(math)) math = 'z_{t-1}';
+      else if (/^z_?t'?$/.test(math)) math = "z_t'";
+      return `$${math}$`;
+    },
   );
 
   // Restore protected segments

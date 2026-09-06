@@ -21,5 +21,11 @@ Start-Sleep -Seconds 4
 # 4. Run node automation script
 node scripts/test-translate-paper.mjs
 
+Write-Host "Running comprehensive fix verification & screenshots..."
+node "C:\Users\Admin\.gemini\antigravity\brain\4bc61129-69a5-44c1-aa2b-8cdeaddd5d68\scratch\verify_all_fixes.mjs"
+
+Write-Host "Running Vision PoC translation for Page 5..."
+node "C:\Users\Admin\.gemini\antigravity\brain\4bc61129-69a5-44c1-aa2b-8cdeaddd5d68\scratch\poc_vision_translate_p5.mjs"
+
 Write-Host "Keeping Chromium alive for inspection..."
-Start-Sleep -Seconds 30
+Start-Sleep -Seconds 60
