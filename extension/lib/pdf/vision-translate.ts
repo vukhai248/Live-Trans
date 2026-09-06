@@ -114,10 +114,113 @@ export async function renderPageToBase64Jpeg(
   return base64;
 }
 
+export const MAX_CACHED_PAPERS = 50;
+export const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 ngày
+export const VISION_REGISTRY_KEY = 'live_trans_vision_cache_registry';
+
+export interface PaperRegistryEntry {
+  url: string;
+  lastAccessed: number;
+  keys: string[];
+}
+
+export interface VisionCacheRegistry {
+  version: 1;
+  papers: Record<string, PaperRegistryEntry>;
+}
+
+function getSafeStorage(type: 'local' | 'session'): Storage | null {
+  try {
+    if (type === 'local' && typeof localStorage !== 'undefined') return localStorage;
+    if (type === 'session' && typeof sessionStorage !== 'undefined') return sessionStorage;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function loadRegistry(): VisionCacheRegistry {
+  const ls = getSafeStorage('local');
+  if (!ls) return { version: 1, papers: {} };
+  try {
+    const raw = ls.getItem(VISION_REGISTRY_KEY);
+    if (!raw) return { version: 1, papers: {} };
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.papers === 'object') {
+      return parsed;
+    }
+  } catch {
+    // corrupted or unavailable
+  }
+  return { version: 1, papers: {} };
+}
+
+function saveRegistry(registry: VisionCacheRegistry): void {
+  const ls = getSafeStorage('local');
+  if (!ls) return;
+  try {
+    ls.setItem(VISION_REGISTRY_KEY, JSON.stringify(registry));
+  } catch {
+    // quota exceeded or blocked
+  }
+}
+
+function removePaperKeys(entry: PaperRegistryEntry): void {
+  const ls = getSafeStorage('local');
+  const ss = getSafeStorage('session');
+  for (const key of entry.keys) {
+    if (ls) {
+      try { ls.removeItem(key); } catch {}
+    }
+    if (ss) {
+      try { ss.removeItem(key); } catch {}
+    }
+  }
+}
+
+/**
+ * Quét dọn bộ nhớ đệm:
+ * 1. Xóa các bài báo đã hết hạn TTL (14 ngày không truy cập).
+ * 2. Thuật toán LRU: Giới hạn lưu trữ tối đa 50 bài báo gần nhất.
+ */
+export function pruneVisionCacheRegistry(registry?: VisionCacheRegistry): VisionCacheRegistry {
+  const reg = registry || loadRegistry();
+  const now = Date.now();
+  let changed = false;
+
+  // 1. Dọn dẹp các bài quá hạn 14 ngày
+  for (const url of Object.keys(reg.papers)) {
+    const entry = reg.papers[url];
+    if (entry && now - entry.lastAccessed > CACHE_TTL_MS) {
+      removePaperKeys(entry);
+      delete reg.papers[url];
+      changed = true;
+    }
+  }
+
+  // 2. Giới hạn LRU tối đa 50 bài báo gần nhất
+  const paperList = Object.values(reg.papers).sort((a, b) => a.lastAccessed - b.lastAccessed);
+  while (paperList.length > MAX_CACHED_PAPERS) {
+    const oldest = paperList.shift();
+    if (oldest) {
+      removePaperKeys(oldest);
+      delete reg.papers[oldest.url];
+      changed = true;
+    }
+  }
+
+  saveRegistry(reg);
+  return reg;
+}
+
 function getVisionCacheKey(pdfUrl: string, pageNumber: number, model: string): string {
   return `live_trans_pdf_vision_${encodeURIComponent(pdfUrl)}_p${pageNumber}_${model}`;
 }
 
+/**
+ * Lấy bản dịch Vision AI từ bộ nhớ đệm bền vững (localStorage).
+ * Hỗ trợ fallback nạp từ sessionStorage cũ nếu có và cập nhật LRU timestamp.
+ */
 export function getCachedVisionTranslation(
   pdfUrl: string,
   pageNumber: number,
@@ -125,48 +228,246 @@ export function getCachedVisionTranslation(
 ): string | null {
   try {
     const key = getVisionCacheKey(pdfUrl, pageNumber, model);
-    return sessionStorage.getItem(key);
+    const ls = getSafeStorage('local');
+    const ss = getSafeStorage('session');
+
+    let val: string | null = null;
+    if (ls) {
+      val = ls.getItem(key);
+    }
+    if (!val && ss) {
+      // Fallback kiểm tra sessionStorage
+      val = ss.getItem(key);
+      if (val && ls) {
+        try {
+          ls.setItem(key, val);
+        } catch {}
+      }
+    }
+
+    if (!val) return null;
+
+    // Kiểm tra TTL theo registry
+    const registry = loadRegistry();
+    const entry = registry.papers[pdfUrl];
+    if (entry) {
+      if (Date.now() - entry.lastAccessed > CACHE_TTL_MS) {
+        // Đã quá hạn 14 ngày
+        removePaperKeys(entry);
+        delete registry.papers[pdfUrl];
+        saveRegistry(registry);
+        return null;
+      }
+      // Gia hạn timestamp truy cập gần nhất (LRU freshening)
+      entry.lastAccessed = Date.now();
+      if (!entry.keys.includes(key)) {
+        entry.keys.push(key);
+      }
+      saveRegistry(registry);
+    } else {
+      registry.papers[pdfUrl] = {
+        url: pdfUrl,
+        lastAccessed: Date.now(),
+        keys: [key],
+      };
+      saveRegistry(registry);
+    }
+
+    return val;
   } catch {
     return null;
   }
 }
 
+/**
+ * Lưu trữ bản dịch Vision AI vào bộ nhớ đệm bền vững (localStorage).
+ * Tự động giải phóng dung lượng theo thuật toán LRU nếu bộ nhớ gần đầy.
+ */
 export function setCachedVisionTranslation(
   pdfUrl: string,
   pageNumber: number,
   markdown: string,
   model: string = 'gemini-3.5-flash-lite',
 ): void {
+  const key = getVisionCacheKey(pdfUrl, pageNumber, model);
+  const ls = getSafeStorage('local');
+  const ss = getSafeStorage('session');
+
+  const registry = loadRegistry();
+
+  let stored = false;
+  if (ls) {
+    try {
+      ls.setItem(key, markdown);
+      stored = true;
+    } catch {
+      // QuotaExceededError -> Kích hoạt dọn dẹp LRU khẩn cấp
+      const paperList = Object.values(registry.papers).sort((a, b) => a.lastAccessed - b.lastAccessed);
+      while (paperList.length > 0 && !stored) {
+        const oldest = paperList.shift();
+        if (oldest && oldest.url !== pdfUrl) {
+          removePaperKeys(oldest);
+          delete registry.papers[oldest.url];
+          try {
+            ls.setItem(key, markdown);
+            stored = true;
+          } catch {}
+        } else {
+          break;
+        }
+      }
+    }
+  }
+
+  // Fallback sang sessionStorage nếu localStorage vẫn đầy hoặc không khả dụng
+  if (!stored && ss) {
+    try {
+      ss.setItem(key, markdown);
+    } catch {}
+  }
+
+  // Cập nhật Registry
+  let entry = registry.papers[pdfUrl];
+  if (!entry) {
+    entry = {
+      url: pdfUrl,
+      lastAccessed: Date.now(),
+      keys: [],
+    };
+    registry.papers[pdfUrl] = entry;
+  }
+  entry.lastAccessed = Date.now();
+  if (!entry.keys.includes(key)) {
+    entry.keys.push(key);
+  }
+
+  // Cắt gọt theo định mức 50 bài & TTL 14 ngày
+  pruneVisionCacheRegistry(registry);
+}
+
+/**
+ * Xóa bản dịch Vision AI đã lưu trong bộ nhớ đệm bền vững.
+ * Nếu truyền pageNumber: chỉ xóa các model của trang đó.
+ * Nếu không truyền pageNumber: xóa toàn bộ bản dịch của tài liệu PDF đó.
+ */
+export function clearCachedVisionTranslation(pdfUrl: string, pageNumber?: number): void {
   try {
-    const key = getVisionCacheKey(pdfUrl, pageNumber, model);
-    sessionStorage.setItem(key, markdown);
+    const ls = getSafeStorage('local');
+    const ss = getSafeStorage('session');
+    const registry = loadRegistry();
+    const entry = registry.papers[pdfUrl];
+
+    if (pageNumber !== undefined) {
+      const prefix = `live_trans_pdf_vision_${encodeURIComponent(pdfUrl)}_p${pageNumber}_`;
+
+      if (ls) {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < ls.length; i++) {
+          const k = ls.key(i);
+          if (k && k.startsWith(prefix)) keysToRemove.push(k);
+        }
+        for (const k of keysToRemove) ls.removeItem(k);
+      }
+
+      if (ss) {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < ss.length; i++) {
+          const k = ss.key(i);
+          if (k && k.startsWith(prefix)) keysToRemove.push(k);
+        }
+        for (const k of keysToRemove) ss.removeItem(k);
+      }
+
+      if (entry) {
+        entry.keys = entry.keys.filter((k) => !k.startsWith(prefix));
+        if (entry.keys.length === 0) {
+          delete registry.papers[pdfUrl];
+        }
+        saveRegistry(registry);
+      }
+    } else {
+      const prefix = `live_trans_pdf_vision_${encodeURIComponent(pdfUrl)}_`;
+
+      if (entry) {
+        removePaperKeys(entry);
+        delete registry.papers[pdfUrl];
+      }
+
+      if (ls) {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < ls.length; i++) {
+          const k = ls.key(i);
+          if (k && k.startsWith(prefix)) keysToRemove.push(k);
+        }
+        for (const k of keysToRemove) ls.removeItem(k);
+      }
+
+      if (ss) {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < ss.length; i++) {
+          const k = ss.key(i);
+          if (k && k.startsWith(prefix)) keysToRemove.push(k);
+        }
+        for (const k of keysToRemove) ss.removeItem(k);
+      }
+
+      saveRegistry(registry);
+    }
   } catch {
-    // sessionStorage quota full or blocked
+    // storage unavailable
   }
 }
 
 /**
- * Clears cached Vision AI translation(s) from sessionStorage.
- * If pageNumber is provided, only removes caches for that specific page across all models.
- * Otherwise, removes all Vision caches for the entire PDF.
+ * Xóa sạch toàn bộ cache Vision AI của tất cả các bài báo.
  */
-export function clearCachedVisionTranslation(pdfUrl: string, pageNumber?: number): void {
+export function clearAllVisionCache(): void {
   try {
-    const prefix = pageNumber !== undefined
-      ? `live_trans_pdf_vision_${encodeURIComponent(pdfUrl)}_p${pageNumber}_`
-      : `live_trans_pdf_vision_${encodeURIComponent(pdfUrl)}_`;
-    const keysToRemove: string[] = [];
-    for (let i = 0; i < sessionStorage.length; i++) {
-      const key = sessionStorage.key(i);
-      if (key && key.startsWith(prefix)) {
-        keysToRemove.push(key);
+    const ls = getSafeStorage('local');
+    const ss = getSafeStorage('session');
+    const registry = loadRegistry();
+
+    for (const entry of Object.values(registry.papers)) {
+      removePaperKeys(entry);
+    }
+
+    if (ls) {
+      const doomed: string[] = [];
+      for (let i = 0; i < ls.length; i++) {
+        const k = ls.key(i);
+        if (k && (k.startsWith('live_trans_pdf_vision_') || k === VISION_REGISTRY_KEY)) {
+          doomed.push(k);
+        }
       }
+      for (const k of doomed) ls.removeItem(k);
     }
-    for (const key of keysToRemove) {
-      sessionStorage.removeItem(key);
+
+    if (ss) {
+      const doomed: string[] = [];
+      for (let i = 0; i < ss.length; i++) {
+        const k = ss.key(i);
+        if (k && k.startsWith('live_trans_pdf_vision_')) {
+          doomed.push(k);
+        }
+      }
+      for (const k of doomed) ss.removeItem(k);
     }
+  } catch {}
+}
+
+/**
+ * Lấy số liệu thống kê cache hiện tại.
+ */
+export function getVisionCacheStats(): { paperCount: number; maxPapers: number; ttlDays: number } {
+  try {
+    const registry = pruneVisionCacheRegistry();
+    return {
+      paperCount: Object.keys(registry.papers).length,
+      maxPapers: MAX_CACHED_PAPERS,
+      ttlDays: Math.round(CACHE_TTL_MS / (24 * 60 * 60 * 1000)),
+    };
   } catch {
-    // sessionStorage blocked or unavailable
+    return { paperCount: 0, maxPapers: MAX_CACHED_PAPERS, ttlDays: 14 };
   }
 }
 

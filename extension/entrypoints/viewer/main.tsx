@@ -7,7 +7,7 @@ import { translatePageBlocks } from '@/lib/pdf/translate';
 import { blocksToMarkdownElements } from '@/lib/pdf/markdown';
 import { WhiteboardPageRenderer } from './WhiteboardPageRenderer';
 import { VisionPageRenderer } from './VisionPageRenderer';
-import { translatePageVision, getCachedVisionTranslation, clearCachedVisionTranslation } from '@/lib/pdf/vision-translate';
+import { translatePageVision, getCachedVisionTranslation, clearCachedVisionTranslation, pruneVisionCacheRegistry } from '@/lib/pdf/vision-translate';
 import { computeReflowOffsets } from '@/lib/pdf/reflow';
 import type { TextBlock, TranslatedBlock, ViewMode } from '@/lib/pdf/types';
 import {
@@ -156,6 +156,9 @@ export function ViewerApp() {
 
   useEffect(() => {
     (window as any).__setSplitRatio = (r: number) => setSplitRatio(r);
+    try {
+      pruneVisionCacheRegistry();
+    } catch {}
   }, []);
 
   // =========================================================================
@@ -1315,6 +1318,9 @@ export function ViewerApp() {
               {/* Reset Layouts & Caches in settings */}
               <div class="lt-setting-field" style={{ borderTop: '1px solid #27272a', paddingTop: '14px' }}>
                 <label class="lt-setting-label">Bố cục & Bộ nhớ tạm</label>
+                <div style={{ fontSize: '11px', color: '#a1a1aa', marginBottom: '8px', lineHeight: '1.4' }}>
+                  ⚡ <strong>Bộ nhớ đệm thông minh:</strong> Lưu trữ bền vững tối đa 50 bài báo trong 14 ngày (LRU). Tự động nạp tức thì 0ms khi mở lại trang hoặc khởi động lại Chrome.
+                </div>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
                   <button
                     class="lt-btn"

@@ -20,6 +20,7 @@ Tài liệu này tổng hợp toàn bộ các lỗi phát sinh trong quá trình
 | **ISSUE-010** | Pipeline / Concurrency | Render tuần tự đơn luồng (concurrency = 1) làm tốc độ dịch tổng thể tài liệu dài chậm; khi user nhảy đến trang xem kết luận/hình ảnh, việc chỉ ưu tiên 1 trang đơn lẻ chưa tối ưu cho trải nghiệm đọc liên tục các trang kế tiếp. | Trước đó chỉ có 1 worker duy nhất xử lý queue tuần tự; preemption chỉ đẩy duy nhất trang hiện tại vào hàng đợi. | Nâng cấp thành **Multi-Worker Concurrent Queue** sliding window với số luồng cấu hình được từ 2 - 7 luồng (mặc định 5 luồng trong Cài đặt); khi cuộn/dừng đọc tại một trang, áp dụng **Batch Preemption Window** tự động ưu tiên cụm $C$ trang liên tiếp `[K, K+1, ..., K+C-1]`. | ✅ Đã hoàn thành & Kiểm chứng |
 | **ISSUE-011** | UI / Responsive Zoom & Toolbar | Khi chọn tỉ lệ chia đôi khác 50:50 (như 30:70, 35:65), chế độ Fit Width bị hỏng vì dùng chung 1 scale đo từ khung trái, khiến khung dịch bên phải bị co rúm để lại khoảng trống thừa rất lớn; thanh toolbar chiếm nhiều chỗ vì text nút dài. | `main.tsx` chỉ duy trì 1 biến scale đo từ khung trái; `.lt-vision-page` bị giới hạn `max-width: 950px` trong CSS; các nút bấm thanh công cụ chưa được tối ưu icon-only. | (1) Tách hệ số scale Fit Width độc lập: `leftFitScale` cho khung bản gốc và `rightFitScale` cho khung bản dịch; (2) Đặt `max-width: 100%` cho `.lt-vision-page`; (3) Tinh gọn thanh toolbar: nút trang và 3 nút chế độ xem chuyển sang icon-only kèm tooltip; đổi nhãn thành `Fit Width`. | ✅ Đã hoàn thành & Kiểm chứng |
 | **ISSUE-012** | UI / Splitter Performance | Khi kéo thanh chia đôi màn hình giữa 2 khung (Splitter), giao diện bị giật lag nghiêm trọng (kể cả khi chưa dịch gì). | `onPointerMove` gọi `setSplitRatio` liên tục trên từng pixel, gây bão re-render toàn bộ `ViewerApp`; kéo theo `leftFitScale` và `rightFitScale` đổi liên tục kích hoạt `page.render()` vẽ lại hàng loạt canvas PDF.js HiDPI trên main thread. | Tách biệt thao tác kéo khỏi render nặng (Direct CSS Dragging + Commit on release): (1) Khi kéo chuột, chỉ thay đổi trực tiếp `width` 2 khung qua CSS DOM bằng `requestAnimationFrame`, đồng thời bật `body.lt-resizing` (`user-select: none; pointer-events: none;`); (2) Chỉ khi nhả chuột (`pointerup`) mới gọi `setSplitRatio` và tính lại scale để render canvas đúng 1 lần duy nhất, đạt 60 - 120 FPS mượt mà. | ✅ Đã hoàn thành & Kiểm chứng |
+| **ISSUE-013** | Storage / Persistent Cache | Bản dịch Vision AI mất sạch khi người dùng đóng tab hoặc thoát trình duyệt Chrome, gây lãng phí lớn thời gian dịch lại và quota API; thiếu cơ chế giới hạn dung lượng và thời hạn bộ nhớ đệm thông minh. | Sử dụng `sessionStorage` thuần túy (vốn tự hủy ngay khi đóng tab hoặc đóng cửa sổ); không có Registry quản lý metadata, không có thuật toán giải phóng bộ nhớ. | Triển khai **Smart Persistent Cache**: (1) Sử dụng `localStorage` lưu trữ bền vững qua các phiên trình duyệt, nạp tức thì 0ms; (2) **LRU Eviction (50 bài báo gần nhất)** tự động dọn các bài cũ nhất khi vượt định mức hoặc đầy quota; (3) **TTL Expiration (14 ngày)** tự động xóa các bài quá hạn 14 ngày không đọc; (4) Hỗ trợ xóa cache chủ động khi bấm "Dịch lại" hoặc "Xóa cache & Dịch lại" trong Cài đặt. | ✅ Đã hoàn thành & Kiểm chứng |
 
 ---
 
@@ -79,5 +80,36 @@ flowchart TD
     Pool --> WorkerCycle
     WakeTimer -.-> Pick
 ```
+
+---
+
+## 4. Kiến trúc Bộ nhớ đệm bền vững thông minh (Smart Persistent Cache: LRU 50 bài & TTL 14 ngày)
+
+```mermaid
+flowchart TD
+    UserReq["Yêu cầu nạp Trang PDF K"] --> CheckLocal{"Kiểm tra Persistent Cache<br/>(localStorage)"}
+    
+    CheckLocal -- "Tìm thấy trong Cache" --> CheckTTL{"Kiểm tra TTL (<= 14 ngày)?"}
+    CheckTTL -- "Đã quá hạn 14 ngày" --> EvictExpired["Xóa bài khỏi Cache & Registry"] --> CallAI["Gọi Vision AI Dịch mới"]
+    CheckTTL -- "Còn hạn sử dụng" --> TouchLRU["Cập nhật lastAccessed = Date.now()<br/>(LRU Freshening)"] --> InstantRender["Hiển thị Tức thì 0ms (Đã dịch ✓)<br/>0 tốn API Quota"]
+    
+    CheckLocal -- "Chưa có trong Cache" --> CallAI
+    
+    CallAI --> VerificationAgent["Verification Agent Làm sạch tiếng Anh"]
+    VerificationAgent --> WriteCache{"Ghi vào localStorage"}
+    
+    WriteCache -- "Thành công" --> UpdateReg["Thêm vào Registry Metadata"]
+    WriteCache -- "Lỗi QuotaExceededError" --> LRUEviction["Kích hoạt dọn dẹp LRU khẩn cấp:<br/>Xóa các bài cũ nhất trong 50 bài"] --> WriteCache
+    
+    UpdateReg --> PruneCheck{"Số bài trong Registry > 50?"}
+    PruneCheck -- "Có (> 50 bài)" --> PruneOldest["Xóa bài có lastAccessed cũ nhất"] --> SaveReg["Lưu Registry"]
+    PruneCheck -- "Không (<= 50 bài)" --> SaveReg
+    
+    subgraph ActiveClear ["Cơ chế Xóa Cache Chủ động"]
+        BtnRetryPage["Nút '↻ Dịch lại' trên từng trang"] --> ClearPageKey["Xóa key trang đó khỏi localStorage & Registry"]
+        BtnSettings["Nút '↻ Xóa cache & Dịch lại' (Cài đặt)"] --> ClearPaper["Xóa toàn bộ các trang của bài báo khỏi Registry"]
+    end
+```
+
 
 
