@@ -33,6 +33,8 @@ export function ViewerApp() {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [scale, setScale] = useState<number>(1.0);
   const [zoomMode, setZoomMode] = useState<'fit' | 'custom'>('fit');
+  const [leftFitScale, setLeftFitScale] = useState<number>(1.0);
+  const [rightFitScale, setRightFitScale] = useState<number>(1.0);
   const [viewMode, setViewMode] = useState<ViewMode>('bilingual');
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [isSidebarPinned, setIsSidebarPinned] = useState<boolean>(false);
@@ -70,23 +72,24 @@ export function ViewerApp() {
   const rightPaneRef = useRef<HTMLDivElement>(null);
   const isSyncingScroll = useRef<boolean>(false);
 
-  // Tự động tính toán tỷ lệ zoom Fit màn hình (vừa khít bề ngang khung xem)
-  const calculateFitScale = useCallback(() => {
-    const pane = (viewMode === 'translated' ? rightPaneRef.current : leftPaneRef.current) || leftPaneRef.current || rightPaneRef.current;
+  // Tự động tính toán tỷ lệ zoom Fit màn hình riêng biệt cho từng khung xem
+  const calculatePaneFitScale = useCallback((pane: HTMLElement | null) => {
     if (!pane) return 1.0;
     const availableWidth = pane.clientWidth - 32;
     if (availableWidth <= 100) return 1.0;
     const baseWidth = 612; // Khổ ngang PDF chuẩn
     const computed = Math.round((availableWidth / baseWidth) * 100) / 100;
-    return Math.max(0.5, Math.min(2.5, computed));
-  }, [viewMode]);
+    return Math.max(0.35, Math.min(3.0, computed));
+  }, []);
 
-  // Hook theo dõi resize cửa sổ, kéo splitter, đóng/mở sidebar để auto-fit scale
+  // Hook theo dõi resize cửa sổ, kéo splitter, đóng/mở sidebar để auto-fit scale độc lập 2 bên
   useEffect(() => {
     if (zoomMode !== 'fit') return;
     const handleResize = () => {
-      const fit = calculateFitScale();
-      setScale(fit);
+      const ls = calculatePaneFitScale(leftPaneRef.current);
+      const rs = calculatePaneFitScale(rightPaneRef.current);
+      setLeftFitScale(ls);
+      setRightFitScale(rs);
     };
 
     handleResize();
@@ -97,7 +100,10 @@ export function ViewerApp() {
       clearTimeout(t);
       window.removeEventListener('resize', handleResize);
     };
-  }, [zoomMode, calculateFitScale, splitRatio, sidebarOpen, isSidebarPinned, viewMode, pdfDoc]);
+  }, [zoomMode, calculatePaneFitScale, splitRatio, sidebarOpen, isSidebarPinned, viewMode, pdfDoc]);
+
+  const effectiveLeftScale = zoomMode === 'fit' ? leftFitScale : scale;
+  const effectiveRightScale = zoomMode === 'fit' ? rightFitScale : scale;
 
   // 1. Initialize settings & load PDF document
   useEffect(() => {
@@ -839,14 +845,13 @@ export function ViewerApp() {
         <div class="lt-toolbar-group">
           <button
             class={`lt-btn lt-sidebar-toggle-btn ${sidebarOpen ? 'active' : ''}`}
-            title={sidebarOpen ? 'Ẩn danh sách trang' : 'Xem danh sách các trang'}
+            title={sidebarOpen ? 'Ẩn danh sách trang' : 'Danh sách trang'}
             onClick={() => setSidebarOpen((v) => !v)}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect width="18" height="18" x="3" y="3" rx="2"/>
               <path d="M9 3v18"/>
             </svg>
-            <span>Trang</span>
           </button>
           <div class="lt-brand">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -873,36 +878,33 @@ export function ViewerApp() {
               onClick={() => setViewMode('bilingual')}
               title="Song ngữ đối chiếu"
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <rect width="18" height="18" x="3" y="3" rx="2"/>
                 <path d="M12 3v18"/>
               </svg>
-              Song ngữ
             </button>
             <button
               class={`lt-seg-btn ${viewMode === 'translated' ? 'active' : ''}`}
               onClick={() => setViewMode('translated')}
               title="Chỉ hiển thị bản dịch"
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/>
                 <path d="M14 2v4a2 2 0 0 0 2 2h4"/>
                 <path d="m3 15 2 2 4-4"/>
               </svg>
-              Bản dịch
             </button>
             <button
               class={`lt-seg-btn ${viewMode === 'original' ? 'active' : ''}`}
               onClick={() => setViewMode('original')}
               title="Chỉ hiển thị bản gốc"
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
                 <polyline points="14 2 14 8 20 8"/>
                 <line x1="16" y1="13" x2="8" y2="13"/>
                 <line x1="16" y1="17" x2="8" y2="17"/>
               </svg>
-              Bản gốc
             </button>
           </div>
 
@@ -1113,14 +1115,17 @@ export function ViewerApp() {
               const val = (e.target as HTMLSelectElement).value;
               if (val === 'fit') {
                 setZoomMode('fit');
-                setScale(calculateFitScale());
+                const ls = calculatePaneFitScale(leftPaneRef.current);
+                const rs = calculatePaneFitScale(rightPaneRef.current);
+                setLeftFitScale(ls);
+                setRightFitScale(rs);
               } else {
                 setZoomMode('custom');
                 setScale(parseFloat(val));
               }
             }}
           >
-            <option value="fit">Vừa màn hình (Fit Width)</option>
+            <option value="fit">Fit Width</option>
             {zoomMode === 'custom' &&
               !['0.75', '0.9', '1', '1.0', '1.15', '1.25', '1.5', '2', '2.0'].includes(String(scale)) && (
                 <option value={String(scale)}>{Math.round(scale * 100)}%</option>
@@ -1479,7 +1484,7 @@ export function ViewerApp() {
                   key={idx + 1}
                   pdfDoc={pdfDoc}
                   pageNumber={idx + 1}
-                  scale={scale}
+                  scale={effectiveLeftScale}
                   type="original"
                   blocks={pageBlocks[idx + 1] || []}
                   hoveredSentenceId={hoveredSentenceId}
@@ -1550,7 +1555,7 @@ export function ViewerApp() {
                       key={pno}
                       pdfDoc={pdfDoc}
                       pageNumber={pno}
-                      scale={scale}
+                      scale={effectiveRightScale}
                       markdownText={pageVisionTranslations[pno] || ''}
                       status={pageVisionStatus[pno] || 'loading'}
                       errorMsg={pageVisionErrors[pno] || ''}
@@ -1568,7 +1573,7 @@ export function ViewerApp() {
                       key={pno}
                       pdfDoc={pdfDoc}
                       pageNumber={pno}
-                      scale={scale}
+                      scale={effectiveRightScale}
                       blocks={pageTranslations[pno] || []}
                       hoveredSentenceId={hoveredSentenceId}
                       onHoverSentence={setHoveredSentenceId}
@@ -1600,7 +1605,7 @@ export function ViewerApp() {
                     key={pno}
                     pdfDoc={pdfDoc}
                     pageNumber={pno}
-                    scale={scale}
+                    scale={effectiveRightScale}
                     type="translated"
                     blocks={pageTranslations[pno] || []}
                     hoveredSentenceId={hoveredSentenceId}
