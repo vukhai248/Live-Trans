@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { extractTextBlocks, isMathFormula, joinLinesWithDehyphenation, type RawTextItem } from './blocks';
+import { extractPageFigures, extractTextBlocks, isMathFormula, joinLinesWithDehyphenation, type RawTextItem } from './blocks';
+
 
 describe('PDF text blocks extractor', () => {
   it('combines text spans on the same line', () => {
@@ -453,4 +454,42 @@ describe('PDF text blocks extractor', () => {
     expect(blocks[0]!.text).toContain('First paragraph');
     expect(blocks[1]!.text).toContain('Second paragraph');
   });
+
+  it('extractPageFigures detects figure captions and calculates graphic bounding boxes', () => {
+    const rawItems: RawTextItem[] = [
+      // Caption for Figure 2 in column 1
+      {
+        str: 'Figure 2: An example of how self-recurrence helps segmentation-guided generation.',
+        transform: [10, 0, 0, 10, 55, 650], // y in PDF coordinates -> top in screen coords = 792 - 650 - 10 = 132
+        width: 230,
+        height: 10,
+        fontName: 'Times-Bold',
+      },
+      // Caption for Figure 3 in column 2
+      {
+        str: 'Figure 3: We compare the ability to match given text prompts.',
+        transform: [10, 0, 0, 10, 310, 440], // y in PDF coordinates -> top in screen coords = 792 - 440 - 10 = 342
+        width: 230,
+        height: 10,
+        fontName: 'Times-Bold',
+      },
+    ];
+
+    const blocks = extractTextBlocks(rawItems, 612, 792, 5);
+    const figures = extractPageFigures(blocks, 612, 5);
+
+    expect(figures).toHaveLength(2);
+
+    const fig2 = figures.find((f) => f.figNum === 2);
+    expect(fig2).toBeDefined();
+    expect(fig2!.bbox[0]).toBe(45); // Left col x
+    expect(fig2!.bbox[1]).toBe(60); // colTop (clears running header)
+    expect(fig2!.bbox[3]).toBeGreaterThan(60); // figHeight
+
+
+    const fig3 = figures.find((f) => f.figNum === 3);
+    expect(fig3).toBeDefined();
+    expect(fig3!.bbox[0]).toBeGreaterThanOrEqual(300); // Right col x
+  });
 });
+

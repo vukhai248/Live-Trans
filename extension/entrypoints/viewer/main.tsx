@@ -7,7 +7,7 @@ import { translatePageBlocks } from '@/lib/pdf/translate';
 import { blocksToMarkdownElements } from '@/lib/pdf/markdown';
 import { WhiteboardPageRenderer } from './WhiteboardPageRenderer';
 import { VisionPageRenderer } from './VisionPageRenderer';
-import { translatePageVision, getCachedVisionTranslation } from '@/lib/pdf/vision-translate';
+import { translatePageVision, getCachedVisionTranslation, clearCachedVisionTranslation } from '@/lib/pdf/vision-translate';
 import { computeReflowOffsets } from '@/lib/pdf/reflow';
 import type { TextBlock, TranslatedBlock, ViewMode } from '@/lib/pdf/types';
 import {
@@ -36,12 +36,15 @@ export function ViewerApp() {
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [isSidebarPinned, setIsSidebarPinned] = useState<boolean>(false);
   const [hoveredSentenceId, setHoveredSentenceId] = useState<string | null>(null);
-  // Bảng trắng Component là mode mặc định (khắc phục dãn nở văn bản & ghosting).
-  const [readerMode, setReaderMode] = useState<'whiteboard' | 'vision' | 'markdown' | 'overlay'>('whiteboard');
+  // Vision AI (LaTeX) là mode đọc mặc định
+  const [readerMode, setReaderMode] = useState<'whiteboard' | 'vision' | 'markdown' | 'overlay'>('vision');
   const [isModeMenuOpen, setIsModeMenuOpen] = useState<boolean>(false);
   const [isSplitMenuOpen, setIsSplitMenuOpen] = useState<boolean>(false);
   const [pageVisionTranslations, setPageVisionTranslations] = useState<Record<number, string>>({});
-  const [pageVisionStatus, setPageVisionStatus] = useState<Record<number, 'loading' | 'done' | 'error'>>({});
+  const [pageVisionStatus, setPageVisionStatus] = useState<Record<number, 'loading' | 'done' | 'error' | 'queued'>>({});
+  const [activePriorityPage, setActivePriorityPage] = useState<number | null>(null);
+  const [pendingPriorityPage, setPendingPriorityPage] = useState<number | null>(null);
+  const [pageVisionErrors, setPageVisionErrors] = useState<Record<number, string>>({});
   const [splitRatio, setSplitRatio] = useState<number>(0.45);
   const isDraggingSplitter = useRef<boolean>(false);
 
@@ -117,25 +120,307 @@ export function ViewerApp() {
     (window as any).__setSplitRatio = (r: number) => setSplitRatio(r);
   }, []);
 
-  // Preload cached vision translations when entering vision mode
+  // =========================================================================
+  // DUAL-PRIORITY QUEUE ENGINE CHO VISION AI (WATERFALL + INTERACTIVE PREEMPTION)
+  // 1. highPriorityQueueRef: Chứa các trang người dùng chủ động nhìn/yêu cầu (0ms delay)
+  // 2. waterfallQueueRef: Chứa các trang chưa dịch theo thứ tự tuần tự 1 -> numPages
+  // 3. Pacing: Nghỉ 800ms giữa các trang background để bảo vệ Quota 15 RPM (an toàn tuyệt đối cho 1 API key)
+  // 4. Preemption: Ngay khi user dừng tại trang >= 300ms, trang đó lập tức chen ngang lên đầu
+  // =========================================================================
+  const highPriorityQueueRef = useRef<number[]>([]);
+  const waterfallQueueRef = useRef<number[]>([]);
+  const isQueueProcessingRef = useRef<boolean>(false);
+  const currentProcessingPageRef = useRef<number | null>(null);
+  const wakePacingTimerRef = useRef<(() => void) | null>(null);
+  const scrollDebounceTimerRef = useRef<any>(null);
+  const isRateLimitedRef = useRef<boolean>(false);
+  const initializedWaterfallRef = useRef<string>('');
+
+  // Giữ ref đồng bộ state để tránh stale closure trong vòng lặp queue
+  const pageVisionStatusRef = useRef<Record<number, 'loading' | 'done' | 'error' | 'queued'>>({});
+  const pageVisionTranslationsRef = useRef<Record<number, string>>({});
+  const visionTokenRef = useRef<Record<number, number>>({});
+
+  const executeVisionTranslation = async (pageNumber: number, force = false) => {
+    if (!pdfDoc || pageNumber < 1 || pageNumber > numPages) return;
+
+    // 1. Kiểm tra cache trước — nạp tức thì trong 0ms nếu đã có
+    if (!force) {
+      const modelToUse = settings.pdfModel || 'gemini-3.5-flash-lite';
+      const candidates = [
+        modelToUse,
+        'gemini-3.5-flash-lite',
+        'gemini-3.5-flash',
+      ];
+      for (const m of candidates) {
+        const cached = getCachedVisionTranslation(pdfUrl, pageNumber, m);
+        if (cached) {
+          setPageVisionTranslations((prev) => ({ ...prev, [pageNumber]: cached }));
+          pageVisionTranslationsRef.current[pageNumber] = cached;
+          setPageVisionStatus((prev) => ({ ...prev, [pageNumber]: 'done' }));
+          pageVisionStatusRef.current[pageNumber] = 'done';
+          return;
+        }
+      }
+    }
+
+    const token = (visionTokenRef.current[pageNumber] || 0) + 1;
+    visionTokenRef.current[pageNumber] = token;
+    const alive = () => visionTokenRef.current[pageNumber] === token;
+
+    setPageVisionErrors((prev) => {
+      const next = { ...prev };
+      delete next[pageNumber];
+      return next;
+    });
+    setPageVisionStatus((prev) => ({ ...prev, [pageNumber]: 'loading' }));
+    pageVisionStatusRef.current[pageNumber] = 'loading';
+
+    try {
+      const md = await translatePageVision(pageNumber, pdfDoc, pdfUrl, settings, force);
+      if (!alive()) return;
+      setPageVisionTranslations((prev) => ({ ...prev, [pageNumber]: md }));
+      pageVisionTranslationsRef.current[pageNumber] = md;
+      setPageVisionStatus((prev) => ({ ...prev, [pageNumber]: 'done' }));
+      pageVisionStatusRef.current[pageNumber] = 'done';
+    } catch (err: any) {
+      if (!alive()) return;
+      console.error(`[Live-Trans Vision] Error translating page ${pageNumber}:`, err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setPageVisionErrors((prev) => ({ ...prev, [pageNumber]: msg }));
+      setPageVisionStatus((prev) => ({ ...prev, [pageNumber]: 'error' }));
+      pageVisionStatusRef.current[pageNumber] = 'error';
+
+      // Nếu gặp lỗi giới hạn tần suất 429 / Quota, tạm dừng thác nước ngầm để tránh bão lỗi
+      if (/429|resource_exhausted|quota/i.test(msg)) {
+        console.warn('[Live-Trans Vision] Rate limit detected (429/Quota). Pausing background waterfall.');
+        isRateLimitedRef.current = true;
+      }
+    }
+  };
+
+  const processVisionQueue = async () => {
+    if (isQueueProcessingRef.current) return;
+    isQueueProcessingRef.current = true;
+
+    try {
+      while (true) {
+        if (!pdfDoc) break;
+
+        let nextPage: number | null = null;
+        let isPriorityJob = false;
+
+        // 1. Quét hàng đợi High Priority trước
+        while (highPriorityQueueRef.current.length > 0) {
+          const p = highPriorityQueueRef.current.shift()!;
+          const modelToUse = settings.pdfModel || 'gemini-3.5-flash-lite';
+          const cached = getCachedVisionTranslation(pdfUrl, p, modelToUse);
+          if (cached) {
+            setPageVisionTranslations((prev) => ({ ...prev, [p]: cached }));
+            pageVisionTranslationsRef.current[p] = cached;
+            setPageVisionStatus((prev) => ({ ...prev, [p]: 'done' }));
+            pageVisionStatusRef.current[p] = 'done';
+            continue;
+          }
+          if (pageVisionStatusRef.current[p] !== 'done') {
+            nextPage = p;
+            isPriorityJob = true;
+            break;
+          }
+        }
+
+        // 2. Nếu không có việc ưu tiên, kiểm tra hàng đợi Waterfall ngầm (nếu chưa bị 429)
+        if (nextPage === null && !isRateLimitedRef.current) {
+          while (waterfallQueueRef.current.length > 0) {
+            const p = waterfallQueueRef.current.shift()!;
+            const modelToUse = settings.pdfModel || 'gemini-3.5-flash-lite';
+            const cached = getCachedVisionTranslation(pdfUrl, p, modelToUse);
+            if (cached) {
+              setPageVisionTranslations((prev) => ({ ...prev, [p]: cached }));
+              pageVisionTranslationsRef.current[p] = cached;
+              setPageVisionStatus((prev) => ({ ...prev, [p]: 'done' }));
+              pageVisionStatusRef.current[p] = 'done';
+              continue;
+            }
+            if (pageVisionStatusRef.current[p] !== 'done') {
+              nextPage = p;
+              isPriorityJob = false;
+              break;
+            }
+          }
+        }
+
+        // Không còn trang nào cần dịch
+        if (nextPage === null) {
+          break;
+        }
+
+        currentProcessingPageRef.current = nextPage;
+        setActivePriorityPage(isPriorityJob ? nextPage : null);
+        if (isPriorityJob) {
+          setPendingPriorityPage((prev) => (prev === nextPage ? null : prev));
+        }
+
+        // 3. Thực thi dịch trang
+        await executeVisionTranslation(nextPage, false);
+
+        currentProcessingPageRef.current = null;
+        setActivePriorityPage(null);
+
+        // 4. Pacing delay: Nếu sắp tới là trang waterfall background, nghỉ 800ms để giữ an toàn 15 RPM
+        // Khoảng nghỉ này có thể bị wakePacingTimerRef đánh thức tức thì nếu user dừng xem trang mới
+        if (highPriorityQueueRef.current.length === 0 && waterfallQueueRef.current.length > 0 && !isRateLimitedRef.current) {
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(() => {
+              wakePacingTimerRef.current = null;
+              resolve();
+            }, 800);
+            wakePacingTimerRef.current = () => {
+              clearTimeout(timer);
+              wakePacingTimerRef.current = null;
+              resolve();
+            };
+          });
+        }
+      }
+    } finally {
+      isQueueProcessingRef.current = false;
+      currentProcessingPageRef.current = null;
+      setActivePriorityPage(null);
+    }
+  };
+
+  const prioritizeVisionPage = useCallback((pageNumber: number, force = false) => {
+    if (pageNumber < 1 || pageNumber > numPages) return;
+    if (!pdfDoc) return;
+
+    if (!force) {
+      const modelToUse = settings.pdfModel || 'gemini-3.5-flash-lite';
+      const cached = getCachedVisionTranslation(pdfUrl, pageNumber, modelToUse);
+      if (cached) {
+        setPageVisionTranslations((prev) => ({ ...prev, [pageNumber]: cached }));
+        pageVisionTranslationsRef.current[pageNumber] = cached;
+        setPageVisionStatus((prev) => ({ ...prev, [pageNumber]: 'done' }));
+        pageVisionStatusRef.current[pageNumber] = 'done';
+        return;
+      }
+      if (pageVisionStatusRef.current[pageNumber] === 'done') {
+        return;
+      }
+      if (currentProcessingPageRef.current === pageNumber) {
+        return;
+      }
+    }
+
+    // Đưa lên đỉnh hàng đợi ưu tiên (deduplicate)
+    highPriorityQueueRef.current = [
+      pageNumber,
+      ...highPriorityQueueRef.current.filter((p) => p !== pageNumber),
+    ];
+    // Loại khỏi waterfall để không dịch trùng
+    waterfallQueueRef.current = waterfallQueueRef.current.filter((p) => p !== pageNumber);
+
+    // Cập nhật trạng thái chờ/ưu tiên trên UI
+    setPageVisionStatus((prev) => {
+      if (prev[pageNumber] !== 'done' && prev[pageNumber] !== 'loading') {
+        const next = { ...prev, [pageNumber]: 'queued' as const };
+        pageVisionStatusRef.current[pageNumber] = 'queued';
+        return next;
+      }
+      return prev;
+    });
+
+    // Mở lại cờ rate limit nếu user chủ động bấm/xem trang
+    isRateLimitedRef.current = false;
+    setPendingPriorityPage(pageNumber);
+
+    // Đánh thức worker ngay lập tức nếu đang ngủ trong nhịp pacing delay 800ms
+    if (wakePacingTimerRef.current) {
+      wakePacingTimerRef.current();
+    }
+
+    void processVisionQueue();
+  }, [numPages, pdfDoc, pdfUrl, settings]);
+
+  const debouncedPrioritizePage = useCallback((pageNumber: number, force = false) => {
+    if (scrollDebounceTimerRef.current) {
+      clearTimeout(scrollDebounceTimerRef.current);
+    }
+    scrollDebounceTimerRef.current = setTimeout(() => {
+      prioritizeVisionPage(pageNumber, force);
+    }, 300);
+  }, [prioritizeVisionPage]);
+
+  // Tương thích ngược với các caller cũ
+  const triggerVisionTranslation = (pageNumber: number, force = false) => {
+    prioritizeVisionPage(pageNumber, force);
+  };
+
+  const retryVisionPage = (pageNumber: number) => {
+    clearCachedVisionTranslation(pdfUrl, pageNumber);
+    setPageVisionTranslations((prev) => {
+      const next = { ...prev };
+      delete next[pageNumber];
+      return next;
+    });
+    delete pageVisionTranslationsRef.current[pageNumber];
+
+    setPageVisionErrors((prev) => {
+      const next = { ...prev };
+      delete next[pageNumber];
+      return next;
+    });
+    delete pageVisionStatusRef.current[pageNumber];
+
+    setPageVisionStatus((prev) => ({ ...prev, [pageNumber]: 'loading' }));
+    pageVisionStatusRef.current[pageNumber] = 'loading';
+
+    if (scrollDebounceTimerRef.current) {
+      clearTimeout(scrollDebounceTimerRef.current);
+    }
+    prioritizeVisionPage(pageNumber, true);
+  };
+
+  // Preload cached vision translations & Khởi chạy Background Waterfall khi nạp tài liệu
   useEffect(() => {
-    if (readerMode === 'vision' && pdfUrl && numPages > 0) {
-      const initialTrans: Record<number, string> = {};
-      const initialStatus: Record<number, 'done'> = {};
-      const model = settings.pdfModel || 'gemini-3.5-flash-lite';
+    if (readerMode !== 'vision' || !pdfUrl || !pdfDoc || numPages <= 0) return;
+    const initKey = `${pdfUrl}_${settings.pdfModel}_${numPages}`;
+    if (initializedWaterfallRef.current === initKey) return;
+    initializedWaterfallRef.current = initKey;
+
+    const initialTrans: Record<number, string> = {};
+    const initialStatus: Record<number, 'done' | 'queued'> = {};
+    const model = settings.pdfModel || 'gemini-3.5-flash-lite';
+    const unrendered: number[] = [];
+
       for (let p = 1; p <= numPages; p++) {
         const cached = getCachedVisionTranslation(pdfUrl, p, model);
         if (cached) {
           initialTrans[p] = cached;
           initialStatus[p] = 'done';
+        } else {
+          initialStatus[p] = 'queued';
+          unrendered.push(p);
         }
       }
-      if (Object.keys(initialTrans).length > 0) {
-        setPageVisionTranslations((prev) => ({ ...initialTrans, ...prev }));
-        setPageVisionStatus((prev) => ({ ...initialStatus, ...prev }));
-      }
-    }
-  }, [readerMode, pdfUrl, numPages, settings.pdfModel]);
+
+      setPageVisionTranslations((prev) => {
+        const merged = { ...initialTrans, ...prev };
+        pageVisionTranslationsRef.current = merged;
+        return merged;
+      });
+      setPageVisionStatus((prev) => {
+        const merged = { ...initialStatus, ...prev };
+        pageVisionStatusRef.current = merged;
+        return merged;
+      });
+
+      // Nạp danh sách các trang chưa dịch vào hàng đợi thác nước
+      waterfallQueueRef.current = unrendered;
+
+      // Ưu tiên ngay trang 1 (hoặc trang hiện tại)
+      prioritizeVisionPage(currentPage || 1);
+  }, [readerMode, pdfUrl, pdfDoc, numPages, settings.pdfModel, prioritizeVisionPage]);
 
   // 2. Synchronized scrolling between left and right panels with Page-to-Page alignment
   const handleLeftScroll = () => {
@@ -187,6 +472,9 @@ export function ViewerApp() {
     }
 
     setCurrentPage(bestPno);
+    if (readerMode === 'vision') {
+      debouncedPrioritizePage(bestPno);
+    }
     requestAnimationFrame(() => {
       isSyncingScroll.current = false;
     });
@@ -243,6 +531,9 @@ export function ViewerApp() {
     }
 
     setCurrentPage(bestPno);
+    if (readerMode === 'vision') {
+      debouncedPrioritizePage(bestPno);
+    }
     requestAnimationFrame(() => {
       isSyncingScroll.current = false;
     });
@@ -317,81 +608,6 @@ export function ViewerApp() {
 
   // Thử lại trang lỗi (badge ⚠).
 
-  // Vision AI Translation Queue & Handler (riêng biệt, không nghẽn bởi text translation)
-  const visionQueueRef = useRef<{ active: number; waiting: Array<() => void> }>({
-    active: 0,
-    waiting: [],
-  });
-
-  const runWithVisionSlot = async (fn: () => Promise<void>): Promise<void> => {
-    const q = visionQueueRef.current;
-    if (q.active >= 2) {
-      await new Promise<void>((resolve) => q.waiting.push(resolve));
-    }
-    q.active++;
-    try {
-      await fn();
-    } finally {
-      q.active--;
-      const next = q.waiting.shift();
-      if (next) next();
-    }
-  };
-
-  const visionTokenRef = useRef<Record<number, number>>({});
-  const triggerVisionTranslation = async (pageNumber: number, force = false) => {
-    if (pageNumber < 1 || pageNumber > numPages) return;
-    if (!force && (!pdfDoc || pageVisionStatus[pageNumber])) return;
-    if (!pdfDoc) return;
-
-    // 1. Kiểm tra cache trước — nạp tức thì mà không cần xếp hàng slot mạng
-    if (!force) {
-      const modelToUse = settings.pdfModel || 'gemini-3.5-flash-lite';
-      const candidates = [
-        modelToUse,
-        'gemini-3.5-flash-lite',
-        'gemini-3.5-flash',
-      ];
-      for (const m of candidates) {
-        const cached = getCachedVisionTranslation(pdfUrl, pageNumber, m);
-        if (cached) {
-          setPageVisionTranslations((prev) => ({ ...prev, [pageNumber]: cached }));
-          setPageVisionStatus((prev) => ({ ...prev, [pageNumber]: 'done' }));
-          return;
-        }
-      }
-    }
-
-    const token = (visionTokenRef.current[pageNumber] || 0) + 1;
-    visionTokenRef.current[pageNumber] = token;
-    const alive = () => visionTokenRef.current[pageNumber] === token;
-
-    setPageVisionStatus((prev) => ({ ...prev, [pageNumber]: 'loading' }));
-
-    await runWithVisionSlot(async () => {
-      if (!alive()) return;
-      try {
-        const md = await translatePageVision(pageNumber, pdfDoc, pdfUrl, settings, force);
-        if (!alive()) return;
-        setPageVisionTranslations((prev) => ({ ...prev, [pageNumber]: md }));
-        setPageVisionStatus((prev) => ({ ...prev, [pageNumber]: 'done' }));
-      } catch (err) {
-        if (!alive()) return;
-        console.error(`[Live-Trans Vision] Error translating page ${pageNumber}:`, err);
-        setPageVisionStatus((prev) => ({ ...prev, [pageNumber]: 'error' }));
-      }
-    });
-  };
-
-  const retryVisionPage = (pageNumber: number) => {
-    setPageVisionStatus((prev) => {
-      const next = { ...prev };
-      delete next[pageNumber];
-      return next;
-    });
-    void triggerVisionTranslation(pageNumber, true);
-  };
-
   const retryPage = (pageNumber: number) => {
     setPageStatus((prev) => {
       const next = { ...prev };
@@ -438,19 +654,22 @@ export function ViewerApp() {
   // Dịch lại toàn bộ các trang từ đầu với provider/model hiện tại.
   const retranslateAll = () => {
     if (readerMode === 'vision') {
-      try {
-        const doomed: string[] = [];
-        for (let i = 0; i < sessionStorage.length; i++) {
-          const k = sessionStorage.key(i);
-          if (k && k.startsWith('live_trans_pdf_vision_')) doomed.push(k);
-        }
-        for (const k of doomed) sessionStorage.removeItem(k);
-      } catch {}
+      clearCachedVisionTranslation(pdfUrl);
       setPageVisionTranslations({});
-      setPageVisionStatus({});
+      pageVisionTranslationsRef.current = {};
+      setPageVisionErrors({});
+      isRateLimitedRef.current = false;
+
+      const initialStatus: Record<number, 'queued'> = {};
+      const allPages: number[] = [];
       for (let p = 1; p <= numPages; p++) {
-        void triggerVisionTranslation(p, true);
+        initialStatus[p] = 'queued';
+        allPages.push(p);
       }
+      setPageVisionStatus(initialStatus);
+      pageVisionStatusRef.current = initialStatus;
+      waterfallQueueRef.current = allPages;
+      prioritizeVisionPage(currentPage || 1, true);
       return;
     }
 
@@ -492,6 +711,13 @@ export function ViewerApp() {
   // Jump to specific page
   const scrollToPage = (pageNumber: number) => {
     setCurrentPage(pageNumber);
+    if (readerMode === 'vision') {
+      // Click trực tiếp từ người dùng là hành động dứt khoát -> Ưu tiên ngay 0ms không cần chờ debounce
+      if (scrollDebounceTimerRef.current) {
+        clearTimeout(scrollDebounceTimerRef.current);
+      }
+      prioritizeVisionPage(pageNumber);
+    }
     const target = leftPaneRef.current?.querySelector(`[data-page-number="${pageNumber}"]`);
     if (target) {
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1073,7 +1299,10 @@ export function ViewerApp() {
             {/* PAGE THUMBNAILS LIST */}
             {Array.from({ length: numPages }).map((_, idx) => {
               const pno = idx + 1;
-              const status = pageStatus[pno];
+              const status = readerMode === 'vision' ? pageVisionStatus[pno] : pageStatus[pno];
+              const isExecutingPriority = activePriorityPage === pno;
+              const isWaitingPriority = pendingPriorityPage === pno;
+              const isPriority = isExecutingPriority || isWaitingPriority;
               return (
                 <div
                   key={pno}
@@ -1082,10 +1311,23 @@ export function ViewerApp() {
                 >
                   <div class="lt-thumb-number">Trang {pno}</div>
                   {status === 'done' && (
-                    <span style={{ fontSize: '10px', color: '#10b981' }}>Đã dịch ✓</span>
+                    <span class="lt-thumb-status lt-thumb-done">Đã dịch ✓</span>
                   )}
                   {status === 'loading' && (
-                    <span style={{ fontSize: '10px', color: '#38bdf8' }}>Đang dịch...</span>
+                    <span class={`lt-thumb-status ${isPriority ? 'lt-thumb-priority' : 'lt-thumb-loading'}`}>
+                      {isPriority ? 'Ưu tiên ⚡' : 'Đang dịch...'}
+                    </span>
+                  )}
+                  {status === 'queued' && (
+                    <span class={`lt-thumb-status ${isWaitingPriority ? 'lt-thumb-priority' : 'lt-thumb-queued'}`}>
+                      {isWaitingPriority ? 'Chờ ưu tiên ⚡' : 'Đang đợi...'}
+                    </span>
+                  )}
+                  {status === 'error' && (
+                    <span class="lt-thumb-status lt-thumb-error">Lỗi ⚠</span>
+                  )}
+                  {!status && (
+                    <span class="lt-thumb-status lt-thumb-pending">Chưa dịch</span>
                   )}
                 </div>
               );
@@ -1116,7 +1358,7 @@ export function ViewerApp() {
                   blocks={pageBlocks[idx + 1] || []}
                   hoveredSentenceId={hoveredSentenceId}
                   onHoverSentence={setHoveredSentenceId}
-                  onVisible={triggerPageTranslation}
+                  onVisible={readerMode === 'vision' ? debouncedPrioritizePage : triggerPageTranslation}
                   status={pageStatus[idx + 1]}
                 />
               ))}
@@ -1180,13 +1422,19 @@ export function ViewerApp() {
                   return (
                     <VisionPageRenderer
                       key={pno}
+                      pdfDoc={pdfDoc}
                       pageNumber={pno}
+                      scale={scale}
                       markdownText={pageVisionTranslations[pno] || ''}
                       status={pageVisionStatus[pno] || 'loading'}
-                      onVisible={triggerVisionTranslation}
+                      errorMsg={pageVisionErrors[pno] || ''}
+                      blocks={pageBlocks[pno] || []}
+                      onVisible={debouncedPrioritizePage}
                       onRetry={retryVisionPage}
+                      isPriority={activePriorityPage === pno || pendingPriorityPage === pno}
                     />
                   );
+
                 }
                 if (readerMode === 'whiteboard') {
                   return (

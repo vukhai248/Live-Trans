@@ -16,7 +16,7 @@ export function isZenResponsesModel(model: string): boolean {
   return model.startsWith('muse-spark');
 }
 
-function getZenKey(settings: Settings): string {
+export function getZenKey(settings: Settings): string {
   const user = settings.zenApiKey?.trim();
   if (user) return user;
   if (typeof __BUILTIN_ZEN_API_KEY__ !== 'undefined' && __BUILTIN_ZEN_API_KEY__) {

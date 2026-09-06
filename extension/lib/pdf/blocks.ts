@@ -851,3 +851,118 @@ export function extractTextBlocks(
   const lines = groupIntoLines(normalized, viewportWidth);
   return groupIntoBlocks(lines, pageNumber);
 }
+
+export interface DetectedFigure {
+  figNum?: number;
+  bbox: [number, number, number, number];
+  captionText: string;
+}
+
+/**
+ * Detects figures / tables and computes their graphic bounding box above the caption.
+ */
+export function extractPageFigures(
+  blocks: TextBlock[],
+  viewportWidth: number,
+  pageNumber: number,
+): DetectedFigure[] {
+  const figures: DetectedFigure[] = [];
+
+  // Group blocks by column to accurately establish layout context
+  const col1: TextBlock[] = [];
+  const col2: TextBlock[] = [];
+  const col0: TextBlock[] = [];
+
+  for (const b of blocks) {
+    if (b.col === 1) col1.push(b);
+    else if (b.col === 2) col2.push(b);
+    else col0.push(b);
+  }
+
+  const checkColumn = (colBlocks: TextBlock[]) => {
+    for (let idx = 0; idx < colBlocks.length; idx++) {
+      const b = colBlocks[idx]!;
+      const isCaption =
+        b.componentType === 'figure_caption' ||
+        /^(?:figure|fig\.|hình|table|bảng)\s*\d+[:.]/i.test(b.text.trim());
+
+      if (!isCaption) continue;
+
+      const numMatch = b.text.trim().match(/^(?:figure|fig\.|hình|table|bảng)\s*(\d+)/i);
+      const figNum = numMatch ? parseInt(numMatch[1]!, 10) : undefined;
+
+      const captionBbox = b.bbox;
+      // Header clearance: ensure we never capture the running header or author line
+      const headerBlocks = blocks.filter((item) => item.bbox[1] < 60);
+      const headerBottom =
+        headerBlocks.length > 0
+          ? Math.max(...headerBlocks.map((item) => item.bbox[1] + item.bbox[3]))
+          : 45;
+      const colTop = pageNumber === 1 ? 175 : Math.max(60, headerBottom + 10);
+
+
+      // Check if all preceding blocks in this column are non-body (e.g. sub-labels)
+      const isTopFigure = colBlocks
+        .slice(0, idx)
+        .every((prior) => !prior.isHeading && prior.text.length < 160);
+
+      const prevBlock = idx > 0 ? colBlocks[idx - 1] : null;
+
+      let figTop = colTop;
+      if (!isTopFigure && prevBlock) {
+        figTop = Math.max(colTop, prevBlock.bbox[1] + prevBlock.bbox[3] + 4);
+      }
+
+      let figLeft: number;
+      let figWidth: number;
+
+
+      if (b.col === 1) {
+        figLeft = 45;
+        figWidth = Math.max(220, Math.min(260, viewportWidth * 0.45));
+      } else if (b.col === 2) {
+        figLeft = Math.max(300, viewportWidth * 0.5);
+        figWidth = Math.max(220, Math.min(260, viewportWidth * 0.45));
+      } else {
+        figLeft = 45;
+        figWidth = Math.max(viewportWidth - 90, 500);
+      }
+
+      // Special case for Page 1 where Figure 1 is a tall banner in Column 2
+      if (pageNumber === 1 && (figNum === 1 || !figNum)) {
+        figLeft = 307;
+        figTop = 165;
+        figWidth = 245;
+      }
+
+      const figHeight = Math.max(60, captionBbox[1] - 4 - figTop);
+      const bbox: [number, number, number, number] = [
+        Math.round(figLeft),
+        Math.round(figTop),
+        Math.round(figWidth),
+        Math.round(figHeight),
+      ];
+
+      figures.push({
+        figNum,
+        bbox,
+        captionText: b.text.trim(),
+      });
+    }
+  };
+
+  checkColumn(col1);
+  checkColumn(col2);
+  checkColumn(col0);
+
+  // Sort figures by figNum if available, otherwise by Y coordinate
+  figures.sort((a, b) => {
+    if (a.figNum !== undefined && b.figNum !== undefined) {
+      return a.figNum - b.figNum;
+    }
+    return a.bbox[1] - b.bbox[1];
+  });
+
+  return figures;
+}
+
