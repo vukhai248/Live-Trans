@@ -1309,7 +1309,7 @@ export function ViewerApp() {
         {/* CLICK-TO-EXPAND SIDEBAR DRAWER (Chỉ mở khi bấm nút Trang, không chiếm diện tích) */}
         <div class={`lt-sidebar-drawer ${sidebarOpen || isSidebarPinned ? 'open' : ''}`}>
           <aside class={`lt-sidebar ${isSidebarPinned ? 'pinned' : ''}`}>
-            {/* QUICK NAV HEADER: Trang 1, Trang cuối, Ghim & Đóng */}
+            {/* DRAWER HEADER: Ghim & Đóng */}
             <div class="lt-drawer-header">
               <div class="lt-drawer-top-row">
                 <div class="lt-drawer-title">
@@ -1324,7 +1324,7 @@ export function ViewerApp() {
                   <button
                     class={`lt-drawer-pin-btn ${isSidebarPinned ? 'active' : ''}`}
                     onClick={() => setIsSidebarPinned(!isSidebarPinned)}
-                    title={isSidebarPinned ? 'Bỏ ghim' : 'Ghim thanh bên'}
+                    title={isSidebarPinned ? 'Bỏ ghim thanh bên' : 'Ghim thanh bên'}
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <line x1="12" y1="17" x2="12" y2="22"/>
@@ -1348,38 +1348,12 @@ export function ViewerApp() {
                 </div>
               </div>
 
-              {/* QUICK JUMP: TRANG 1 & TRANG CUỐI */}
-              <div class="lt-drawer-quick-nav">
-                <button
-                  class="lt-drawer-quick-btn"
-                  onClick={() => scrollToPage(1)}
-                  title="Nhảy nhanh về Trang đầu (Trang 1)"
-                >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="11 17 6 12 11 7"/>
-                    <polyline points="18 17 13 12 18 7"/>
-                  </svg>
-                  Trang 1
-                </button>
-                <button
-                  class="lt-drawer-quick-btn"
-                  onClick={() => scrollToPage(numPages)}
-                  title={`Nhảy nhanh tới Trang cuối (Trang ${numPages})`}
-                >
-                  Trang {numPages || 'cuối'}
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="13 17 18 12 13 7"/>
-                    <polyline points="6 17 11 12 6 7"/>
-                  </svg>
-                </button>
-              </div>
-
               <div class="lt-drawer-page-stat">
                 Đang xem: <strong>Trang {currentPage}</strong> / {numPages}
               </div>
             </div>
 
-            {/* PAGE THUMBNAILS LIST */}
+            {/* PAGE THUMBNAILS LIST - Gọn gàng 1 dòng duy nhất */}
             {Array.from({ length: numPages }).map((_, idx) => {
               const pno = idx + 1;
               const status = readerMode === 'vision' ? pageVisionStatus[pno] : pageStatus[pno];
@@ -1392,7 +1366,7 @@ export function ViewerApp() {
                   class={`lt-thumb-item ${currentPage === pno ? 'active' : ''}`}
                   onClick={() => scrollToPage(pno)}
                 >
-                  <div class="lt-thumb-number">Trang {pno}</div>
+                  <span class="lt-thumb-number">Trang {pno}</span>
                   {status === 'done' && (
                     <span class="lt-thumb-status lt-thumb-done">Đã dịch ✓</span>
                   )}
