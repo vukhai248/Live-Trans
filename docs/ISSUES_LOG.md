@@ -17,6 +17,7 @@ Tài liệu này tổng hợp toàn bộ các lỗi phát sinh trong quá trình
 | **ISSUE-007** | Cache & Retry | Nhấn nút "Dịch lại" (Retry) chỉ thấy animation chạy xong nhưng nội dung lỗi tiếng Anh vẫn giữ nguyên 100%. | (1) `temperature` cố định 0.2 khiến model sinh ra đúng token cũ khi gọi lại API; (2) Khi gọi lại model Vision đơn lẻ, visual anchor lặp lại y hệt khiến kết quả không đổi. | Tăng dynamic temperature (0.45) khi retry, kết hợp Verification Agent bắt buộc đầu ra phải sạch tiếng Anh trước khi ghi đè cache. | ✅ Đã khắc phục |
 | **ISSUE-008** | Pipeline / UX | Trải nghiệm dịch chậm khi đọc paper phi tuyến tính (Abstract -> Conclusion -> Figures). Chờ cuộn tới đâu mới dịch tới đó gây gián đoạn mạch đọc. Cuộn nhanh lại dễ gây nghẽn hoặc lỗi 429 Quota Exceeded. | Thiếu cơ chế dự dịch nền (Background Waterfall) và cơ chế chen ngang hàng đợi (Interactive Preemption); thiếu bộ đệm pacing điều phối tải API cho 1 API key. | Xây dựng Dual-Priority Queue Engine: Background Waterfall tự động dịch tuần tự 1 -> N (pacing 800ms, concurrency=1); khi user dừng ở trang bất kỳ >= 300ms, trang đó lập tức được chen ngang lên đỉnh ưu tiên (0ms delay) và dịch ngay. | ✅ Đã hoàn thành & Kiểm chứng |
 | **ISSUE-009** | Renderer / Layout | Khi thay đổi tỷ lệ Zoom (ví dụ: 115%), phần cắt trích xuất hình ảnh (Figure Snippet) bị trôi lệch tọa độ, cắt chèn vào văn bản bên dưới và méo tỷ lệ (như Hình 4 & 5). | `VisionPageRenderer` sử dụng viewport đã nhân `scale` truyền vào hàm `extractTextBlocks` và `extractPageFigures`, khiến tọa độ Y bị cộng dồn sai lệch `(scale - 1) * 792`, dẫn đến hộp cắt `bbox` bị phóng to và trượt khỏi vị trí hình ảnh gốc. | Cố định hệ tọa độ bóc tách layout luôn ở `scale = 1.0` (chuẩn điểm ảnh PDF), đồng thời truyền scale vào `PdfSnippet` để phóng to hiển thị responsive mà không làm biến dạng tọa độ cắt. | ✅ Đã khắc phục & Kiểm chứng |
+| **ISSUE-010** | Pipeline / Concurrency | Render tuần tự đơn luồng (concurrency = 1) làm tốc độ dịch tổng thể tài liệu dài chậm; khi user nhảy đến trang xem kết luận/hình ảnh, việc chỉ ưu tiên 1 trang đơn lẻ chưa tối ưu cho trải nghiệm đọc liên tục các trang kế tiếp. | Trước đó chỉ có 1 worker duy nhất xử lý queue tuần tự; preemption chỉ đẩy duy nhất trang hiện tại vào hàng đợi. | Nâng cấp thành **Multi-Worker Concurrent Queue** sliding window với số luồng cấu hình được từ 2 - 7 luồng (mặc định 5 luồng trong Cài đặt); khi cuộn/dừng đọc tại một trang, áp dụng **Batch Preemption Window** tự động ưu tiên cụm $C$ trang liên tiếp `[K, K+1, ..., K+C-1]`. | ✅ Đã hoàn thành & Kiểm chứng |
 
 ---
 
@@ -34,7 +35,7 @@ graph TD
 
 ---
 
-## 3. Kiến trúc điều phối hàng đợi: Dual-Priority Queue Engine (Background Waterfall & Preemption)
+## 3. Kiến trúc điều phối hàng đợi: Multi-Worker Concurrent Queue & Batch Preemption Window
 
 ```mermaid
 flowchart TD
@@ -43,24 +44,38 @@ flowchart TD
     CheckCache -- "Có Cache" --> DoneInstant["Hiển thị tức thì 0ms (Đã dịch ✓)"]
     CheckCache -- "Chưa Cache" --> QueueList["Xếp vào Thác nước (Đang đợi...)"]
 
-    subgraph Preemption ["Cơ chế Chen ngang Ưu tiên (Interactive Preemption)"]
-        UserScroll["User cuộn đến Trang K (dừng >= 300ms) HOẶC click Thumbnail"] --> HighQ["Đẩy Trang K vào High Priority Queue (⚡ Ưu tiên)"]
-        HighQ --> WakeTimer["Hủy nhịp nghỉ pacing delay & Đánh thức Engine xử lý ngay"]
+    subgraph BatchPreempt ["Cơ chế Cửa sổ Chen ngang Cụm (Batch Preemption Window)"]
+        UserScroll["User cuộn đến Trang K (dừng >= 300ms) HOẶC click Thumbnail"] --> BatchGen["Tạo cụm C trang: [K, K+1, ..., K+C-1]<br/>(C = Concurrency, Mặc định = 5)"]
+        BatchGen --> HighQ["Đẩy cả cụm C trang lên đỉnh High Priority Queue (⚡ Ưu tiên)"]
+        HighQ --> WakeTimer["Hủy nhịp nghỉ pacing delay & Đánh thức tất cả Worker xử lý ngay"]
     end
 
-    subgraph Worker ["Vision Translation Worker (concurrency = 1)"]
-        Loop{"Kiểm tra hàng đợi"}
-        Loop -- "High Priority Queue có phần tử" --> PopHigh["Bốc Trang K (0ms delay)"]
-        Loop -- "High Priority Queue rỗng" --> PopWater["Bốc Trang tiếp theo từ Waterfall Queue"]
+    subgraph Pool ["Worker Pool Đa luồng (Concurrency C = 2..7, Mặc định = 5)"]
+        W1["Worker 1"]
+        W2["Worker 2"]
+        W3["Worker 3"]
+        W4["Worker 4"]
+        W5["Worker 5"]
+    end
+
+    HighQ --> Pool
+    QueueList --> Pool
+
+    subgraph WorkerCycle ["Vòng lặp mỗi Worker (Sliding Window)"]
+        Pick{"Bốc việc tiếp theo"}
+        Pick -- "High Priority Queue có trang" --> PopHigh["Bốc trang ưu tiên (0ms delay)"]
+        Pick -- "High Priority Queue rỗng" --> PopWater["Bốc trang tiếp theo từ Waterfall Queue"]
         
         PopHigh --> ExecTrans["Gọi Vision AI + Verification Agent"]
         PopWater --> ExecTrans
         
-        ExecTrans --> SaveCache["Lưu Session Cache & Update UI (Đã dịch ✓)"]
-        SaveCache --> Pacing["Nghỉ an toàn 800ms (Bảo vệ Quota 15 RPM)"]
-        Pacing --> Loop
+        ExecTrans --> SaveCache["Lưu Session Cache & Cập nhật UI (Đã dịch ✓)"]
+        SaveCache --> Pacing["Nghỉ an toàn 400ms giữa các trang thác nước"]
+        Pacing --> Pick
     end
 
-    WakeTimer -.-> Loop
+    Pool --> WorkerCycle
+    WakeTimer -.-> Pick
 ```
+
 

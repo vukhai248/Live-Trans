@@ -24,6 +24,7 @@ const settings: Settings = {
   pdfProvider: 'gemini',
   pdfModel: 'gemini-3.5-flash-lite',
   zenApiKey: '',
+  pdfConcurrency: 5,
 };
 
 class FakeProvider implements Provider {

@@ -43,6 +43,8 @@ export interface Settings {
   pdfModel: string;
   /** User's own OpenCode Zen API key (dự phòng khi Gemini ốm). */
   zenApiKey: string;
+  /** Số trang PDF dịch song song cùng lúc (Worker pool concurrency: 2-7, mặc định 5). */
+  pdfConcurrency: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -59,6 +61,7 @@ export const DEFAULT_SETTINGS: Settings = {
   pdfProvider: 'gemini',
   pdfModel: DEFAULT_PDF_MODEL.gemini,
   zenApiKey: '',
+  pdfConcurrency: 5,
 };
 
 export function clampChunk(seconds: number): number {
@@ -76,6 +79,7 @@ export async function loadSettings(): Promise<Settings> {
       ...DEFAULT_SETTINGS,
       ...raw,
       chunkSeconds: clampChunk(raw?.chunkSeconds ?? 45),
+      pdfConcurrency: Math.min(7, Math.max(2, raw?.pdfConcurrency ?? 5)),
     };
   } catch {
     return DEFAULT_SETTINGS;

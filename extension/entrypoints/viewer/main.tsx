@@ -43,8 +43,8 @@ export function ViewerApp() {
   const [isSplitMenuOpen, setIsSplitMenuOpen] = useState<boolean>(false);
   const [pageVisionTranslations, setPageVisionTranslations] = useState<Record<number, string>>({});
   const [pageVisionStatus, setPageVisionStatus] = useState<Record<number, 'loading' | 'done' | 'error' | 'queued'>>({});
-  const [activePriorityPage, setActivePriorityPage] = useState<number | null>(null);
-  const [pendingPriorityPage, setPendingPriorityPage] = useState<number | null>(null);
+  const [activePriorityPages, setActivePriorityPages] = useState<number[]>([]);
+  const [pendingPriorityPages, setPendingPriorityPages] = useState<number[]>([]);
   const [pageVisionErrors, setPageVisionErrors] = useState<Record<number, string>>({});
   const [splitRatio, setSplitRatio] = useState<number>(0.45);
   const isDraggingSplitter = useRef<boolean>(false);
@@ -61,6 +61,7 @@ export function ViewerApp() {
   // Trang chưa dịch dùng model mới, trang đã dịch giữ nguyên.
   const [pendingProvider, setPendingProvider] = useState<PdfProvider>(DEFAULT_SETTINGS.pdfProvider);
   const [pendingModel, setPendingModel] = useState<string>(DEFAULT_SETTINGS.pdfModel);
+  const [pendingConcurrency, setPendingConcurrency] = useState<number>(DEFAULT_SETTINGS.pdfConcurrency);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [geminiKeyInput, setGeminiKeyInput] = useState<string>('');
   const [zenKeyInput, setZenKeyInput] = useState<string>('');
@@ -111,6 +112,7 @@ export function ViewerApp() {
       setSettings(s);
       setPendingProvider(s.pdfProvider);
       setPendingModel(s.pdfModel);
+      setPendingConcurrency(s.pdfConcurrency || 5);
       setGeminiKeyInput(s.apiKey || '');
       setZenKeyInput(s.zenApiKey || '');
 
@@ -157,10 +159,18 @@ export function ViewerApp() {
   // 3. Pacing: Nghỉ 800ms giữa các trang background để bảo vệ Quota 15 RPM (an toàn tuyệt đối cho 1 API key)
   // 4. Preemption: Ngay khi user dừng tại trang >= 300ms, trang đó lập tức chen ngang lên đầu
   // =========================================================================
+  // =========================================================================
+  // MULTI-WORKER DUAL-PRIORITY QUEUE ENGINE CHO VISION AI (WATERFALL + BATCH PREEMPTION)
+  // 1. highPriorityQueueRef: Chứa các trang ưu tiên (chen ngang theo cụm window)
+  // 2. waterfallQueueRef: Chứa các trang chưa dịch theo thứ tự tuần tự 1 -> numPages
+  // 3. activeProcessingPagesRef: Set các trang đang được xử lý bởi các workers (tránh chạy trùng)
+  // 4. activeWorkersCountRef: Đếm số worker đang chạy song song (tối đa settings.pdfConcurrency, mặc định 5)
+  // 5. Preemption: Khi user dừng xem trang K, ưu tiên cả cụm [K, ..., K + Concurrency - 1]
+  // =========================================================================
   const highPriorityQueueRef = useRef<number[]>([]);
   const waterfallQueueRef = useRef<number[]>([]);
-  const isQueueProcessingRef = useRef<boolean>(false);
-  const currentProcessingPageRef = useRef<number | null>(null);
+  const activeWorkersCountRef = useRef<number>(0);
+  const activeProcessingPagesRef = useRef<Set<number>>(new Set());
   const wakePacingTimerRef = useRef<(() => void) | null>(null);
   const scrollDebounceTimerRef = useRef<any>(null);
   const isRateLimitedRef = useRef<boolean>(false);
@@ -229,10 +239,7 @@ export function ViewerApp() {
     }
   };
 
-  const processVisionQueue = async () => {
-    if (isQueueProcessingRef.current) return;
-    isQueueProcessingRef.current = true;
-
+  const runVisionWorker = async () => {
     try {
       while (true) {
         if (!pdfDoc) break;
@@ -243,6 +250,7 @@ export function ViewerApp() {
         // 1. Quét hàng đợi High Priority trước
         while (highPriorityQueueRef.current.length > 0) {
           const p = highPriorityQueueRef.current.shift()!;
+          if (activeProcessingPagesRef.current.has(p)) continue;
           const modelToUse = settings.pdfModel || 'gemini-3.5-flash-lite';
           const cached = getCachedVisionTranslation(pdfUrl, p, modelToUse);
           if (cached) {
@@ -263,6 +271,7 @@ export function ViewerApp() {
         if (nextPage === null && !isRateLimitedRef.current) {
           while (waterfallQueueRef.current.length > 0) {
             const p = waterfallQueueRef.current.shift()!;
+            if (activeProcessingPagesRef.current.has(p)) continue;
             const modelToUse = settings.pdfModel || 'gemini-3.5-flash-lite';
             const cached = getCachedVisionTranslation(pdfUrl, p, modelToUse);
             if (cached) {
@@ -280,31 +289,33 @@ export function ViewerApp() {
           }
         }
 
-        // Không còn trang nào cần dịch
+        // Không còn trang nào cần dịch trong lượt này
         if (nextPage === null) {
           break;
         }
 
-        currentProcessingPageRef.current = nextPage;
-        setActivePriorityPage(isPriorityJob ? nextPage : null);
+        activeProcessingPagesRef.current.add(nextPage);
         if (isPriorityJob) {
-          setPendingPriorityPage((prev) => (prev === nextPage ? null : prev));
+          setActivePriorityPages((prev) => [...prev.filter((x) => x !== nextPage), nextPage]);
+          setPendingPriorityPages((prev) => prev.filter((x) => x !== nextPage));
         }
 
-        // 3. Thực thi dịch trang
-        await executeVisionTranslation(nextPage, false);
+        try {
+          await executeVisionTranslation(nextPage, false);
+        } finally {
+          activeProcessingPagesRef.current.delete(nextPage);
+          if (isPriorityJob) {
+            setActivePriorityPages((prev) => prev.filter((x) => x !== nextPage));
+          }
+        }
 
-        currentProcessingPageRef.current = null;
-        setActivePriorityPage(null);
-
-        // 4. Pacing delay: Nếu sắp tới là trang waterfall background, nghỉ 800ms để giữ an toàn 15 RPM
-        // Khoảng nghỉ này có thể bị wakePacingTimerRef đánh thức tức thì nếu user dừng xem trang mới
+        // Pacing delay 400ms giữa các trang thác nước nền (đánh thức tức thì khi có ưu tiên)
         if (highPriorityQueueRef.current.length === 0 && waterfallQueueRef.current.length > 0 && !isRateLimitedRef.current) {
           await new Promise<void>((resolve) => {
             const timer = setTimeout(() => {
               wakePacingTimerRef.current = null;
               resolve();
-            }, 800);
+            }, 400);
             wakePacingTimerRef.current = () => {
               clearTimeout(timer);
               wakePacingTimerRef.current = null;
@@ -314,9 +325,29 @@ export function ViewerApp() {
         }
       }
     } finally {
-      isQueueProcessingRef.current = false;
-      currentProcessingPageRef.current = null;
-      setActivePriorityPage(null);
+      activeWorkersCountRef.current = Math.max(0, activeWorkersCountRef.current - 1);
+      const maxWorkers = Math.min(7, Math.max(2, settings.pdfConcurrency || 5));
+      if (
+        activeWorkersCountRef.current < maxWorkers &&
+        (highPriorityQueueRef.current.length > 0 || (waterfallQueueRef.current.length > 0 && !isRateLimitedRef.current))
+      ) {
+        processVisionQueue();
+      }
+    }
+  };
+
+  const processVisionQueue = () => {
+    if (!pdfDoc) return;
+    const maxWorkers = Math.min(7, Math.max(2, settings.pdfConcurrency || 5));
+
+    while (activeWorkersCountRef.current < maxWorkers) {
+      const hasPriority = highPriorityQueueRef.current.length > 0;
+      const hasWaterfall = waterfallQueueRef.current.length > 0 && !isRateLimitedRef.current;
+      if (!hasPriority && !hasWaterfall) {
+        break;
+      }
+      activeWorkersCountRef.current++;
+      void runVisionWorker();
     }
   };
 
@@ -324,52 +355,75 @@ export function ViewerApp() {
     if (pageNumber < 1 || pageNumber > numPages) return;
     if (!pdfDoc) return;
 
-    if (!force) {
-      const modelToUse = settings.pdfModel || 'gemini-3.5-flash-lite';
-      const cached = getCachedVisionTranslation(pdfUrl, pageNumber, modelToUse);
-      if (cached) {
-        setPageVisionTranslations((prev) => ({ ...prev, [pageNumber]: cached }));
-        pageVisionTranslationsRef.current[pageNumber] = cached;
-        setPageVisionStatus((prev) => ({ ...prev, [pageNumber]: 'done' }));
-        pageVisionStatusRef.current[pageNumber] = 'done';
-        return;
-      }
-      if (pageVisionStatusRef.current[pageNumber] === 'done') {
-        return;
-      }
-      if (currentProcessingPageRef.current === pageNumber) {
-        return;
+    const concurrency = Math.min(7, Math.max(2, settings.pdfConcurrency || 5));
+    // Tạo cụm cửa sổ concurrency trang liên tiếp bắt đầu từ pageNumber
+    const batchPages: number[] = [];
+    for (let i = 0; i < concurrency; i++) {
+      const p = pageNumber + i;
+      if (p <= numPages) {
+        batchPages.push(p);
       }
     }
 
-    // Đưa lên đỉnh hàng đợi ưu tiên (deduplicate)
+    const uncompletedBatch: number[] = [];
+    for (const p of batchPages) {
+      if (!force) {
+        const modelToUse = settings.pdfModel || 'gemini-3.5-flash-lite';
+        const cached = getCachedVisionTranslation(pdfUrl, p, modelToUse);
+        if (cached) {
+          setPageVisionTranslations((prev) => ({ ...prev, [p]: cached }));
+          pageVisionTranslationsRef.current[p] = cached;
+          setPageVisionStatus((prev) => ({ ...prev, [p]: 'done' }));
+          pageVisionStatusRef.current[p] = 'done';
+          continue;
+        }
+        if (pageVisionStatusRef.current[p] === 'done') {
+          continue;
+        }
+        if (activeProcessingPagesRef.current.has(p)) {
+          continue;
+        }
+      }
+      uncompletedBatch.push(p);
+    }
+
+    if (uncompletedBatch.length === 0 && !force) return;
+
+    // Đưa cả cụm uncompletedBatch lên đỉnh hàng đợi ưu tiên (deduplicate)
     highPriorityQueueRef.current = [
-      pageNumber,
-      ...highPriorityQueueRef.current.filter((p) => p !== pageNumber),
+      ...uncompletedBatch,
+      ...highPriorityQueueRef.current.filter((p) => !uncompletedBatch.includes(p)),
     ];
     // Loại khỏi waterfall để không dịch trùng
-    waterfallQueueRef.current = waterfallQueueRef.current.filter((p) => p !== pageNumber);
+    waterfallQueueRef.current = waterfallQueueRef.current.filter((p) => !uncompletedBatch.includes(p));
 
     // Cập nhật trạng thái chờ/ưu tiên trên UI
     setPageVisionStatus((prev) => {
-      if (prev[pageNumber] !== 'done' && prev[pageNumber] !== 'loading') {
-        const next = { ...prev, [pageNumber]: 'queued' as const };
-        pageVisionStatusRef.current[pageNumber] = 'queued';
-        return next;
+      const next = { ...prev };
+      let changed = false;
+      for (const p of uncompletedBatch) {
+        if (next[p] !== 'done' && next[p] !== 'loading') {
+          next[p] = 'queued';
+          pageVisionStatusRef.current[p] = 'queued';
+          changed = true;
+        }
       }
-      return prev;
+      return changed ? next : prev;
     });
 
     // Mở lại cờ rate limit nếu user chủ động bấm/xem trang
     isRateLimitedRef.current = false;
-    setPendingPriorityPage(pageNumber);
+    setPendingPriorityPages((prev) => [
+      ...uncompletedBatch,
+      ...prev.filter((p) => !uncompletedBatch.includes(p)),
+    ]);
 
-    // Đánh thức worker ngay lập tức nếu đang ngủ trong nhịp pacing delay 800ms
+    // Đánh thức worker ngay lập tức nếu đang ngủ trong nhịp pacing delay
     if (wakePacingTimerRef.current) {
       wakePacingTimerRef.current();
     }
 
-    void processVisionQueue();
+    processVisionQueue();
   }, [numPages, pdfDoc, pdfUrl, settings]);
 
   const debouncedPrioritizePage = useCallback((pageNumber: number, force = false) => {
@@ -672,6 +726,7 @@ export function ViewerApp() {
       ...settings,
       pdfProvider: pendingProvider,
       pdfModel,
+      pdfConcurrency: pendingConcurrency,
       apiKey: geminiKeyInput.trim(),
       zenApiKey: zenKeyInput.trim(),
     };
@@ -1232,6 +1287,26 @@ export function ViewerApp() {
                 />
               </div>
 
+              {/* Tùy chọn số luồng dịch song song (Concurrency) */}
+              <div class="lt-setting-field">
+                <label class="lt-setting-label">Số trang dịch song song (Concurrency)</label>
+                <div class="lt-setting-desc">
+                  Số worker dịch đồng thời theo hàng đợi thác nước. Khuyên dùng 5 trang để đọc nhanh mà không nghẽn mạng.
+                </div>
+                <select
+                  class="lt-setting-select"
+                  value={pendingConcurrency}
+                  onChange={(e) => setPendingConcurrency(Number((e.target as HTMLSelectElement).value))}
+                >
+                  <option value={2}>2 trang song song</option>
+                  <option value={3}>3 trang song song</option>
+                  <option value={4}>4 trang song song</option>
+                  <option value={5}>5 trang song song (Mặc định)</option>
+                  <option value={6}>6 trang song song</option>
+                  <option value={7}>7 trang song song (Tối đa)</option>
+                </select>
+              </div>
+
               {/* Reset Layouts & Caches in settings */}
               <div class="lt-setting-field" style={{ borderTop: '1px solid #27272a', paddingTop: '14px' }}>
                 <label class="lt-setting-label">Bố cục & Bộ nhớ tạm</label>
@@ -1351,8 +1426,8 @@ export function ViewerApp() {
             {Array.from({ length: numPages }).map((_, idx) => {
               const pno = idx + 1;
               const status = readerMode === 'vision' ? pageVisionStatus[pno] : pageStatus[pno];
-              const isExecutingPriority = activePriorityPage === pno;
-              const isWaitingPriority = pendingPriorityPage === pno;
+              const isExecutingPriority = activePriorityPages.includes(pno);
+              const isWaitingPriority = pendingPriorityPages.includes(pno);
               const isPriority = isExecutingPriority || isWaitingPriority;
               return (
                 <div
@@ -1482,7 +1557,7 @@ export function ViewerApp() {
                       blocks={pageBlocks[pno] || []}
                       onVisible={debouncedPrioritizePage}
                       onRetry={retryVisionPage}
-                      isPriority={activePriorityPage === pno || pendingPriorityPage === pno}
+                      isPriority={activePriorityPages.includes(pno) || pendingPriorityPages.includes(pno)}
                     />
                   );
 

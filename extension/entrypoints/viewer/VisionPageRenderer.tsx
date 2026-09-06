@@ -568,7 +568,7 @@ function parseAlgorithmLine(rawLine: string): ParsedAlgorithmLine {
   // 2. If no quad tokens, measure raw leading spaces
   if (indent === 0) {
     const spaceMatch = rawLine.match(/^(\s+)/);
-    if (spaceMatch) {
+    if (spaceMatch && spaceMatch[1]) {
       const numSpaces = spaceMatch[1].replace(/\t/g, '    ').length;
       indent = Math.floor(numSpaces / 4) || (numSpaces >= 2 ? 1 : 0);
     }
