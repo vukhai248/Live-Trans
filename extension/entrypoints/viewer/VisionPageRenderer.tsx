@@ -111,15 +111,17 @@ export function VisionPageRenderer({
         const vp = page.getViewport({ scale });
         setDimensions({ width: vp.width, height: vp.height });
 
-        // Extract layout figures from blocks or text content
+        // CỐ ĐỊNH: Bóc tách text blocks và bounding boxes hình ảnh LUÔN dùng scale = 1.0 chuẩn (PDF points)
+        // để tọa độ không bị trôi lệch hay phình to khi người dùng zoom (115%, 150%, Fit Width,...)
+        const vpBase = page.getViewport({ scale: 1.0 });
         let pageBlocks = blocks;
         if (!pageBlocks || pageBlocks.length === 0) {
           const textContent = await page.getTextContent();
           if (!active) return;
-          pageBlocks = extractTextBlocks(textContent.items as any, vp.width, vp.height, pageNumber);
+          pageBlocks = extractTextBlocks(textContent.items as any, vpBase.width, vpBase.height, pageNumber);
         }
 
-        const figs = extractPageFigures(pageBlocks, vp.width, pageNumber);
+        const figs = extractPageFigures(pageBlocks, vpBase.width, pageNumber);
         if (active) {
           setDetectedFigures(figs);
         }
@@ -312,6 +314,7 @@ export function VisionPageRenderer({
             pageNumber={pageNumber}
             figuresMap={figuresMap}
             detectedFigures={detectedFigures}
+            scale={scale}
           />
         ) : null}
       </div>
@@ -325,6 +328,7 @@ interface VisionMarkdownContentProps {
   pageNumber: number;
   figuresMap: Map<number, [number, number, number, number]>;
   detectedFigures: DetectedFigure[];
+  scale?: number;
 }
 
 function VisionMarkdownContent({
@@ -333,6 +337,7 @@ function VisionMarkdownContent({
   pageNumber,
   figuresMap,
   detectedFigures,
+  scale,
 }: VisionMarkdownContentProps) {
   const blocks = parseMarkdownIntoBlocks(content);
   let figureCount = 0;
@@ -357,6 +362,7 @@ function VisionMarkdownContent({
               figuresMap={figuresMap}
               detectedFigures={detectedFigures}
               figureIndex={currentFigIdx}
+              scale={scale}
             />
           );
         }
@@ -398,6 +404,7 @@ function VisionFigureCard({
   figuresMap,
   detectedFigures,
   figureIndex,
+  scale,
 }: {
   block: ParsedBlock;
   pdfDoc?: PDFDocumentProxy;
@@ -405,6 +412,7 @@ function VisionFigureCard({
   figuresMap: Map<number, [number, number, number, number]>;
   detectedFigures: DetectedFigure[];
   figureIndex: number;
+  scale?: number;
 }) {
   const figNum = block.figNum;
   let figBbox: [number, number, number, number] | undefined;
@@ -426,6 +434,7 @@ function VisionFigureCard({
             pdfDoc={pdfDoc}
             pageNumber={pageNumber}
             bbox={figBbox}
+            scale={scale}
             alt={`Hình ${figNum || ''}`}
           />
         </div>

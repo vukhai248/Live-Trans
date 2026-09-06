@@ -32,6 +32,7 @@ export function ViewerApp() {
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [scale, setScale] = useState<number>(1.0);
+  const [zoomMode, setZoomMode] = useState<'fit' | 'custom'>('fit');
   const [viewMode, setViewMode] = useState<ViewMode>('bilingual');
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [isSidebarPinned, setIsSidebarPinned] = useState<boolean>(false);
@@ -67,6 +68,35 @@ export function ViewerApp() {
   const leftPaneRef = useRef<HTMLDivElement>(null);
   const rightPaneRef = useRef<HTMLDivElement>(null);
   const isSyncingScroll = useRef<boolean>(false);
+
+  // Tự động tính toán tỷ lệ zoom Fit màn hình (vừa khít bề ngang khung xem)
+  const calculateFitScale = useCallback(() => {
+    const pane = (viewMode === 'translated' ? rightPaneRef.current : leftPaneRef.current) || leftPaneRef.current || rightPaneRef.current;
+    if (!pane) return 1.0;
+    const availableWidth = pane.clientWidth - 32;
+    if (availableWidth <= 100) return 1.0;
+    const baseWidth = 612; // Khổ ngang PDF chuẩn
+    const computed = Math.round((availableWidth / baseWidth) * 100) / 100;
+    return Math.max(0.5, Math.min(2.5, computed));
+  }, [viewMode]);
+
+  // Hook theo dõi resize cửa sổ, kéo splitter, đóng/mở sidebar để auto-fit scale
+  useEffect(() => {
+    if (zoomMode !== 'fit') return;
+    const handleResize = () => {
+      const fit = calculateFitScale();
+      setScale(fit);
+    };
+
+    handleResize();
+    const t = setTimeout(handleResize, 120);
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [zoomMode, calculateFitScale, splitRatio, sidebarOpen, isSidebarPinned, viewMode, pdfDoc]);
 
   // 1. Initialize settings & load PDF document
   useEffect(() => {
@@ -1014,26 +1044,47 @@ export function ViewerApp() {
           <button
             class="lt-btn"
             title="Thu nhỏ"
-            onClick={() => setScale((s) => Math.max(0.5, Math.round((s - 0.15) * 100) / 100))}
+            onClick={() => {
+              setZoomMode('custom');
+              setScale((s) => Math.max(0.5, Math.round((s - 0.15) * 100) / 100));
+            }}
           >
             −
           </button>
           <select
             class="lt-select"
-            value={scale}
-            onChange={(e) => setScale(parseFloat((e.target as HTMLSelectElement).value))}
+            value={zoomMode === 'fit' ? 'fit' : String(scale)}
+            onChange={(e) => {
+              const val = (e.target as HTMLSelectElement).value;
+              if (val === 'fit') {
+                setZoomMode('fit');
+                setScale(calculateFitScale());
+              } else {
+                setZoomMode('custom');
+                setScale(parseFloat(val));
+              }
+            }}
           >
+            <option value="fit">Vừa màn hình (Fit Width)</option>
+            {zoomMode === 'custom' &&
+              !['0.75', '0.9', '1', '1.0', '1.15', '1.25', '1.5', '2', '2.0'].includes(String(scale)) && (
+                <option value={String(scale)}>{Math.round(scale * 100)}%</option>
+              )}
             <option value="0.75">75%</option>
             <option value="0.9">90%</option>
             <option value="1.0">100%</option>
             <option value="1.15">115%</option>
             <option value="1.25">125%</option>
             <option value="1.5">150%</option>
+            <option value="2.0">200%</option>
           </select>
           <button
             class="lt-btn"
             title="Phóng to"
-            onClick={() => setScale((s) => Math.min(2.5, Math.round((s + 0.15) * 100) / 100))}
+            onClick={() => {
+              setZoomMode('custom');
+              setScale((s) => Math.min(2.5, Math.round((s + 0.15) * 100) / 100));
+            }}
           >
             +
           </button>

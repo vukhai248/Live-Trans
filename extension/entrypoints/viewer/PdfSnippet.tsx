@@ -7,6 +7,7 @@ export interface PdfSnippetProps {
   bbox: [number, number, number, number];
   alt?: string;
   className?: string;
+  scale?: number;
 }
 
 // Cached rendered PDF page canvases for ultra-fast snippet extraction
@@ -18,6 +19,7 @@ export function PdfSnippet({
   bbox,
   alt = 'Equation or Figure',
   className = '',
+  scale = 1.0,
 }: PdfSnippetProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bboxKey = bbox.join(',');
@@ -26,14 +28,14 @@ export function PdfSnippet({
     let active = true;
     void (async () => {
       try {
-        const scale = 2.0; // 2x HiDPI
-        const cacheKey = `${(pdfDoc as any).fingerprint || 'doc'}_p${pageNumber}_s${scale}`;
+        const renderScale = 2.0; // 2x HiDPI
+        const cacheKey = `${(pdfDoc as any).fingerprint || 'doc'}_p${pageNumber}_s${renderScale}`;
 
         let offCanvas = pdfPageCanvasCache.get(cacheKey);
         if (!offCanvas) {
           const page = await pdfDoc.getPage(pageNumber);
           if (!active) return;
-          const vp = page.getViewport({ scale });
+          const vp = page.getViewport({ scale: renderScale });
 
           offCanvas = document.createElement('canvas');
           offCanvas.width = Math.floor(vp.width);
@@ -55,17 +57,19 @@ export function PdfSnippet({
 
         const [bx, by, bw, bh] = bbox;
         const pad = 4;
-        const sx = Math.max(0, Math.floor((bx - pad) * scale));
-        const sy = Math.max(0, Math.floor((by - pad) * scale));
-        const sw = Math.min(offCanvas.width - sx, Math.floor((bw + pad * 2) * scale));
-        const sh = Math.min(offCanvas.height - sy, Math.floor((bh + pad * 2) * scale));
+        const sx = Math.max(0, Math.floor((bx - pad) * renderScale));
+        const sy = Math.max(0, Math.floor((by - pad) * renderScale));
+        const sw = Math.min(offCanvas.width - sx, Math.floor((bw + pad * 2) * renderScale));
+        const sh = Math.min(offCanvas.height - sy, Math.floor((bh + pad * 2) * renderScale));
 
         if (sw <= 0 || sh <= 0) return;
 
         targetCanvas.width = sw;
         targetCanvas.height = sh;
-        targetCanvas.style.width = `${Math.round(sw / scale)}px`;
-        targetCanvas.style.height = `${Math.round(sh / scale)}px`;
+        const displayW = Math.round((bw + pad * 2) * scale);
+        targetCanvas.style.width = `${displayW}px`;
+        targetCanvas.style.maxWidth = '100%';
+        targetCanvas.style.height = 'auto';
 
         const tCtx = targetCanvas.getContext('2d');
         if (tCtx) {
@@ -79,7 +83,7 @@ export function PdfSnippet({
     return () => {
       active = false;
     };
-  }, [pdfDoc, pageNumber, bboxKey]);
+  }, [pdfDoc, pageNumber, bboxKey, scale]);
 
   return (
     <div class={`lt-snippet-container ${className}`} title={alt}>
