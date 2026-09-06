@@ -1,27 +1,18 @@
-declare const __BUILTIN_GEMINI_API_KEYS__: string[] | undefined;
-
 export class KeyRouter {
   private keys: string[] = [];
   private currentIndex = 0;
   private cooldownMap: Map<string, number> = new Map();
 
-  constructor(userKey?: string) {
+  constructor(userKey?: string | string[]) {
     const pool = new Set<string>();
 
-    // 1. Keys provided by user (can be single or comma-separated)
-    if (userKey && userKey.trim()) {
-      for (const k of userKey.split(/[\n,;]+/)) {
-        const trimmed = k.trim();
+    if (Array.isArray(userKey)) {
+      for (const k of userKey) {
+        const trimmed = typeof k === 'string' ? k.trim() : '';
         if (trimmed) pool.add(trimmed);
       }
-    }
-
-    // 2. Built-in keys from .env (injected at build-time)
-    if (
-      typeof __BUILTIN_GEMINI_API_KEYS__ !== 'undefined' &&
-      Array.isArray(__BUILTIN_GEMINI_API_KEYS__)
-    ) {
-      for (const k of __BUILTIN_GEMINI_API_KEYS__) {
+    } else if (userKey && typeof userKey === 'string' && userKey.trim()) {
+      for (const k of userKey.split(/[\n,;]+/)) {
         const trimmed = k.trim();
         if (trimmed) pool.add(trimmed);
       }
@@ -93,13 +84,36 @@ export class KeyRouter {
 
   /**
    * Executes an asynchronous API call with automatic key rotation on HTTP 429 / Quota limits.
+   * - If > 1 keys: automatically rotates to the next available key.
+   * - If <= 1 key: immediately throws user-friendly rate limit error without retrying.
    */
   async execute<T>(fn: (activeKey: string) => Promise<T>): Promise<T> {
     if (this.keys.length === 0) {
-      throw new Error('Chưa có Gemini API Key nào được cấu hình.');
+      throw new Error('Chưa có API Key nào được cấu hình. Vui lòng vào Cài đặt để thêm API Key.');
     }
 
-    const attempts = Math.max(1, this.keys.length);
+    // Nếu chỉ có 1 key và bị lỗi quota: không rotate, báo lỗi ngay lập tức
+    if (this.keys.length === 1) {
+      const singleKey = this.keys[0]!;
+      try {
+        return await fn(singleKey);
+      } catch (err: unknown) {
+        const msg = String((err as { message?: string })?.message || err);
+        const isQuota =
+          msg.includes('429') ||
+          msg.includes('quota') ||
+          msg.includes('RESOURCE_EXHAUSTED') ||
+          msg.includes('rate_limit') ||
+          msg.includes('Quota exceeded');
+        if (isQuota) {
+          throw new Error('Đã chạm hạn mức Rate Limit (429) hoặc Quota của API Key. Vui lòng thử lại sau hoặc thêm API Key dự phòng trong Cài đặt.');
+        }
+        throw err;
+      }
+    }
+
+    // Nếu có >= 2 keys: Smart Router tự động xoay tua qua các key
+    const attempts = this.keys.length;
     let lastError: unknown = null;
 
     for (let i = 0; i < attempts; i++) {
@@ -117,8 +131,7 @@ export class KeyRouter {
           msg.includes('rate_limit') ||
           msg.includes('Quota exceeded');
 
-        if (isQuota && this.keys.length > 1) {
-          // Extract retry wait if present (default 60s)
+        if (isQuota) {
           const waitMatch = msg.match(/retry in ([\d.]+)\s*s/i);
           const cooldown = waitMatch && waitMatch[1] ? Math.ceil(parseFloat(waitMatch[1])) : 60;
           this.markRateLimited(key, cooldown);
@@ -134,11 +147,23 @@ export class KeyRouter {
   }
 }
 
+function areKeyListsEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((val, idx) => val === b[idx]);
+}
+
 let globalRouter: KeyRouter | null = null;
 
-export function getKeyRouter(userKey?: string): KeyRouter {
-  if (!globalRouter || (userKey && !globalRouter.getAllKeys().includes(userKey.trim()))) {
-    globalRouter = new KeyRouter(userKey);
+export function getKeyRouter(userKey?: string | string[]): KeyRouter {
+  const inputKeys: string[] = Array.isArray(userKey)
+    ? userKey.filter((k) => typeof k === 'string' && k.trim().length > 0)
+    : userKey
+    ? userKey.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  if (globalRouter && areKeyListsEqual(globalRouter.getAllKeys(), inputKeys)) {
+    return globalRouter;
   }
+  globalRouter = new KeyRouter(inputKeys);
   return globalRouter;
 }

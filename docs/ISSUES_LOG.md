@@ -21,6 +21,7 @@ Tài liệu này tổng hợp toàn bộ các lỗi phát sinh trong quá trình
 | **ISSUE-011** | UI / Responsive Zoom & Toolbar | Khi chọn tỉ lệ chia đôi khác 50:50 (như 30:70, 35:65), chế độ Fit Width bị hỏng vì dùng chung 1 scale đo từ khung trái, khiến khung dịch bên phải bị co rúm để lại khoảng trống thừa rất lớn; thanh toolbar chiếm nhiều chỗ vì text nút dài. | `main.tsx` chỉ duy trì 1 biến scale đo từ khung trái; `.lt-vision-page` bị giới hạn `max-width: 950px` trong CSS; các nút bấm thanh công cụ chưa được tối ưu icon-only. | (1) Tách hệ số scale Fit Width độc lập: `leftFitScale` cho khung bản gốc và `rightFitScale` cho khung bản dịch; (2) Đặt `max-width: 100%` cho `.lt-vision-page`; (3) Tinh gọn thanh toolbar: nút trang và 3 nút chế độ xem chuyển sang icon-only kèm tooltip; đổi nhãn thành `Fit Width`. | ✅ Đã hoàn thành & Kiểm chứng |
 | **ISSUE-012** | UI / Splitter Performance | Khi kéo thanh chia đôi màn hình giữa 2 khung (Splitter), giao diện bị giật lag nghiêm trọng (kể cả khi chưa dịch gì). | `onPointerMove` gọi `setSplitRatio` liên tục trên từng pixel, gây bão re-render toàn bộ `ViewerApp`; kéo theo `leftFitScale` và `rightFitScale` đổi liên tục kích hoạt `page.render()` vẽ lại hàng loạt canvas PDF.js HiDPI trên main thread. | Tách biệt thao tác kéo khỏi render nặng (Direct CSS Dragging + Commit on release): (1) Khi kéo chuột, chỉ thay đổi trực tiếp `width` 2 khung qua CSS DOM bằng `requestAnimationFrame`, đồng thời bật `body.lt-resizing` (`user-select: none; pointer-events: none;`); (2) Chỉ khi nhả chuột (`pointerup`) mới gọi `setSplitRatio` và tính lại scale để render canvas đúng 1 lần duy nhất, đạt 60 - 120 FPS mượt mà. | ✅ Đã hoàn thành & Kiểm chứng |
 | **ISSUE-013** | Storage / Persistent Cache | Bản dịch Vision AI mất sạch khi người dùng đóng tab hoặc thoát trình duyệt Chrome, gây lãng phí lớn thời gian dịch lại và quota API; thiếu cơ chế giới hạn dung lượng và thời hạn bộ nhớ đệm thông minh. | Sử dụng `sessionStorage` thuần túy (vốn tự hủy ngay khi đóng tab hoặc đóng cửa sổ); không có Registry quản lý metadata, không có thuật toán giải phóng bộ nhớ. | Triển khai **Smart Persistent Cache**: (1) Sử dụng `localStorage` lưu trữ bền vững qua các phiên trình duyệt, nạp tức thì 0ms; (2) **LRU Eviction (50 bài báo gần nhất)** tự động dọn các bài cũ nhất khi vượt định mức hoặc đầy quota; (3) **TTL Expiration (14 ngày)** tự động xóa các bài quá hạn 14 ngày không đọc; (4) Hỗ trợ xóa cache chủ động khi bấm "Dịch lại" hoặc "Xóa cache & Dịch lại" trong Cài đặt. | ✅ Đã hoàn thành & Kiểm chứng |
+| **ISSUE-014** | Onboarding / First-run UX | Khi người dùng mới cài đặt lần đầu và mở PDF Viewer mà chưa nhập API Key, hàng đợi thác nước tự động gọi AI dịch ngầm và báo lỗi đỏ ở từng trang ("Không thể dịch Trang X"), gây bối rối cho người dùng mới. | Trình đọc PDF khởi động với mode mặc định là Vision AI và tự động kích hoạt hàng đợi dịch thác nước ngay khi nạp tài liệu mà chưa kiểm tra xem người dùng đã cấu hình API Key hay chưa. | (1) Ngắt kết nối nạp key từ `.env`; (2) Thêm Banner cảnh báo màu cam ở đầu khung dịch tạm dừng hàng đợi ngầm; (3) Giao diện Quản lý Đa API Key với nút `+` và dropdown chọn provider; (4) Smart Router chỉ rotate khi $\ge 2$ keys, nếu 1 key thì báo lỗi limit; (5) Popup hỏi lựa chọn dịch lại sau khi lưu key. | ✅ Đã khắc phục & Kiểm chứng |
 
 ---
 
@@ -111,5 +112,18 @@ flowchart TD
     end
 ```
 
+---
 
+## 5. Phân tích Chi tiết ISSUE-014: Trải nghiệm Người dùng Mới khi Chưa Cấu hình API Key
 
+- **Hiện tượng**: Khi một người dùng mới cài đặt extension lần đầu (fresh install) và mở một tài liệu PDF bất kỳ:
+  1. Giao diện Viewer nạp trang PDF gốc rất nhanh và chuẩn xác.
+  2. Tuy nhiên bên khung dịch, chế độ mặc định là `Vision AI` tự động kích hoạt hàng đợi thác nước để dịch Trang 1..5.
+  3. Vì người dùng mới chưa nhập Gemini API Key, các yêu cầu dịch ngầm trả về lỗi `Chưa cấu hình Gemini API Key` (hoặc lỗi 429 nếu dùng key chia sẻ chung quá tải).
+  4. Bên khung dịch hiển thị các thẻ đỏ `Không thể dịch Trang 1`, tạo cảm giác extension bị lỗi dù thực chất chỉ là chưa có key.
+- **Giải pháp đề xuất cải thiện (Pending user confirmation)**:
+  - Kiểm tra `apiKey`: Nếu cả Gemini API Key và Zen API Key đều trống, thay vì tự động kích hoạt hàng đợi dịch thác nước, hiển thị một **Onboarding Banner** hoặc **Empty State Card** trang nhã:
+    - Tiêu đề: *"Chào mừng bạn đến với Live-Trans PDF Viewer!"*
+    - Hướng dẫn: *"Để bắt đầu dịch tài liệu AI/học thuật với giữ nguyên công thức toán KaTeX & hình ảnh, vui lòng nhập Google Gemini API Key (hoàn toàn miễn phí)."*
+    - Nút bấm trực tiếp: *"⚙️ Mở Cài đặt nhập Key (1 click)"* kèm link hướng dẫn lấy key trong 30 giây tại `aistudio.google.com`.
+  - Tự động bắt đầu dịch ngay khi người dùng lưu key thành công.

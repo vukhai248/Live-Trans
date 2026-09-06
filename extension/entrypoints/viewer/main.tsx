@@ -18,8 +18,12 @@ import {
   PDF_ZEN_MODELS,
   type Settings,
   type PdfProvider,
+  type ApiKeyItem,
+  getProviderKeys,
+  maskApiKey,
 } from '@/lib/settings';
 import 'katex/dist/katex.min.css';
+import { CustomSelect } from './CustomSelect';
 
 // Configure PDF.js worker from extension bundle
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('pdf.worker.min.mjs');
@@ -64,8 +68,10 @@ export function ViewerApp() {
   const [pendingModel, setPendingModel] = useState<string>(DEFAULT_SETTINGS.pdfModel);
   const [pendingConcurrency, setPendingConcurrency] = useState<number>(DEFAULT_SETTINGS.pdfConcurrency);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
-  const [geminiKeyInput, setGeminiKeyInput] = useState<string>('');
-  const [zenKeyInput, setZenKeyInput] = useState<string>('');
+  const [keyItems, setKeyItems] = useState<ApiKeyItem[]>([]);
+  const [newKeyProvider, setNewKeyProvider] = useState<PdfProvider>('gemini');
+  const [newKeyText, setNewKeyText] = useState<string>('');
+  const [isPostSavePromptOpen, setIsPostSavePromptOpen] = useState<boolean>(false);
 
   const leftPaneRef = useRef<HTMLDivElement>(null);
   const rightPaneRef = useRef<HTMLDivElement>(null);
@@ -118,8 +124,8 @@ export function ViewerApp() {
       setPendingProvider(s.pdfProvider);
       setPendingModel(s.pdfModel);
       setPendingConcurrency(s.pdfConcurrency || 5);
-      setGeminiKeyInput(s.apiKey || '');
-      setZenKeyInput(s.zenApiKey || '');
+      setKeyItems(s.apiKeys || []);
+      setNewKeyProvider(s.pdfProvider);
 
       const params = new URLSearchParams(window.location.search);
       const url = params.get('url');
@@ -193,6 +199,37 @@ export function ViewerApp() {
   const scrollDebounceTimerRef = useRef<any>(null);
   const isRateLimitedRef = useRef<boolean>(false);
   const initializedWaterfallRef = useRef<string>('');
+
+  const activeProviderKeys = useMemo(() => {
+    return getProviderKeys(settings, settings.pdfProvider);
+  }, [settings]);
+
+  const hasActiveKey = activeProviderKeys.length > 0;
+
+  const modalProviderKeys = useMemo(() => {
+    return keyItems.filter((k) => k.provider === pendingProvider);
+  }, [keyItems, pendingProvider]);
+
+  const handleAddKey = () => {
+    const trimmed = newKeyText.trim();
+    if (!trimmed) return;
+    if (keyItems.some((k) => k.key === trimmed)) {
+      alert('API Key này đã tồn tại trong danh sách!');
+      return;
+    }
+    const newItem: ApiKeyItem = {
+      id: `${newKeyProvider}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      provider: newKeyProvider,
+      key: trimmed,
+      createdAt: Date.now(),
+    };
+    setKeyItems((prev) => [...prev, newItem]);
+    setNewKeyText('');
+  };
+
+  const handleRemoveKey = (id: string) => {
+    setKeyItems((prev) => prev.filter((k) => k.id !== id));
+  };
 
   // Giữ ref đồng bộ state để tránh stale closure trong vòng lặp queue
   const pageVisionStatusRef = useRef<Record<number, 'loading' | 'done' | 'error' | 'queued'>>({});
@@ -356,6 +393,7 @@ export function ViewerApp() {
 
   const processVisionQueue = () => {
     if (!pdfDoc) return;
+    if (!hasActiveKey) return;
     const maxWorkers = Math.min(7, Math.max(2, settings.pdfConcurrency || 5));
 
     while (activeWorkersCountRef.current < maxWorkers) {
@@ -717,18 +755,24 @@ export function ViewerApp() {
     const pdfModel = (validModels as readonly string[]).includes(pendingModel)
       ? pendingModel
       : DEFAULT_PDF_MODEL[pendingProvider];
+    const geminiKeys = keyItems.filter((k) => k.provider === 'gemini').map((k) => k.key.trim());
+    const zenKeys = keyItems.filter((k) => k.provider === 'zen').map((k) => k.key.trim());
     const next: Settings = {
       ...settings,
       pdfProvider: pendingProvider,
       pdfModel,
       pdfConcurrency: pendingConcurrency,
-      apiKey: geminiKeyInput.trim(),
-      zenApiKey: zenKeyInput.trim(),
+      apiKeys: keyItems,
+      apiKey: geminiKeys[0] || '',
+      zenApiKey: zenKeys[0] || '',
     };
     setSettings(next);
     setPendingModel(pdfModel);
     void saveSettings(next);
     setIsSettingsOpen(false);
+
+    // Mở popup hỏi người dùng muốn dịch lại trang hiện tại, toàn bộ tài liệu hay để sau
+    setIsPostSavePromptOpen(true);
   };
 
   // Dịch lại toàn bộ các trang từ đầu với provider/model hiện tại.
@@ -1167,18 +1211,18 @@ export function ViewerApp() {
                 <div class="lt-setting-desc">
                   Chọn Google Gemini chính thức hoặc OpenCode Zen (OpenAI-compatible)
                 </div>
-                <select
-                  class="lt-setting-select"
+                <CustomSelect
                   value={pendingProvider}
-                  onChange={(e) => {
-                    const p = (e.target as HTMLSelectElement).value as PdfProvider;
+                  options={[
+                    { value: 'gemini', label: 'Google Gemini (Mặc định, ổn định)', desc: 'Chính thức từ Google AI Studio, nhanh & nhiều quota' },
+                    { value: 'zen', label: 'OpenCode Zen (Dự phòng SOTA)', desc: 'OpenAI-compatible proxy, hỗ trợ đa model SOTA' },
+                  ]}
+                  onChange={(val) => {
+                    const p = val as PdfProvider;
                     setPendingProvider(p);
                     setPendingModel(DEFAULT_PDF_MODEL[p]);
                   }}
-                >
-                  <option value="gemini">Google Gemini (Mặc định, ổn định)</option>
-                  <option value="zen">OpenCode Zen (Dự phòng SOTA)</option>
-                </select>
+                />
               </div>
 
               {/* Model */}
@@ -1189,46 +1233,116 @@ export function ViewerApp() {
                     ? 'Khuyên dùng gemini-3.5-flash-lite để dịch nhanh, nhiều quota và mượt'
                     : 'Các model mã nguồn mở hoặc thương mại hỗ trợ qua Zen API'}
                 </div>
-                <select
-                  class="lt-setting-select"
+                <CustomSelect
                   value={pendingModel}
-                  onChange={(e) => setPendingModel((e.target as HTMLSelectElement).value)}
-                >
-                  {(pendingProvider === 'gemini' ? PDF_GEMINI_MODELS : PDF_ZEN_MODELS).map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* API Keys */}
-              <div class="lt-setting-field">
-                <label class="lt-setting-label">
-                  <span>Google Gemini API Key</span>
-                  {geminiKeyInput ? <span style={{ color: '#4ade80', fontSize: '11px' }}>● Đã cấu hình</span> : null}
-                </label>
-                <input
-                  type="password"
-                  class="lt-setting-input"
-                  placeholder="AIzaSy..."
-                  value={geminiKeyInput}
-                  onInput={(e) => setGeminiKeyInput((e.target as HTMLInputElement).value)}
+                  options={(pendingProvider === 'gemini' ? PDF_GEMINI_MODELS : PDF_ZEN_MODELS).map((m) => ({
+                    value: m,
+                    label: m,
+                  }))}
+                  onChange={(val) => setPendingModel(val as string)}
                 />
               </div>
 
+              {/* QUẢN LÝ ĐA API KEY VỚI SMART ROUTER */}
               <div class="lt-setting-field">
-                <label class="lt-setting-label">
-                  <span>OpenCode Zen API Key</span>
-                  {zenKeyInput ? <span style={{ color: '#4ade80', fontSize: '11px' }}>● Đã cấu hình</span> : null}
-                </label>
-                <input
-                  type="password"
-                  class="lt-setting-input"
-                  placeholder="zen_..."
-                  value={zenKeyInput}
-                  onInput={(e) => setZenKeyInput((e.target as HTMLInputElement).value)}
-                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label class="lt-setting-label" style={{ margin: 0 }}>Quản lý API Key (Đa khóa & Smart Router)</label>
+                  <span class="lt-key-count-badge">
+                    {modalProviderKeys.length} key {pendingProvider === 'gemini' ? 'Gemini' : 'Zen'}
+                  </span>
+                </div>
+                <div class="lt-setting-desc">
+                  Thêm một hoặc nhiều key để hệ thống tự động xoay tua (Router) khi gặp giới hạn hạn mức Rate Limit (429).
+                </div>
+
+                {/* Hàng thêm key: Dropdown chọn provider + Ô nhập key + Nút Thêm */}
+                <div class="lt-add-key-row">
+                  <CustomSelect
+                    className="lt-key-provider-select"
+                    value={newKeyProvider}
+                    options={[
+                      { value: 'gemini', label: 'Google Gemini' },
+                      { value: 'zen', label: 'OpenCode Zen' },
+                    ]}
+                    onChange={(val) => setNewKeyProvider(val as PdfProvider)}
+                  />
+                  <input
+                    type="password"
+                    class="lt-setting-input lt-key-input"
+                    placeholder={newKeyProvider === 'gemini' ? 'Nhập Gemini Key (AIzaSy...)' : 'Nhập Zen Key (sk-...)'}
+                    value={newKeyText}
+                    onInput={(e) => setNewKeyText((e.target as HTMLInputElement).value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddKey();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    class="lt-btn lt-btn-primary lt-btn-add-key"
+                    onClick={handleAddKey}
+                    title="Thêm API Key này vào danh sách"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <line x1="12" y1="5" x2="12" y2="19"/>
+                      <line x1="5" y1="12" x2="12" y2="12"/>
+                    </svg>
+                    <span>Thêm</span>
+                  </button>
+                </div>
+
+                {/* Danh sách các key đã thêm */}
+                <div class="lt-keys-list">
+                  {keyItems.length === 0 ? (
+                    <div class="lt-keys-empty">Chưa có API key nào. Vui lòng thêm ít nhất 1 key ở trên để bắt đầu dịch.</div>
+                  ) : (
+                    keyItems.map((item, idx) => (
+                      <div key={item.id} class="lt-key-card">
+                        <div class="lt-key-card-left">
+                          <span class={`lt-key-badge lt-key-badge-${item.provider}`}>
+                            {item.provider === 'gemini' ? 'Gemini' : 'Zen'}
+                          </span>
+                          <span class="lt-key-masked">
+                            {maskApiKey(item.key)}
+                          </span>
+                          {idx === 0 && (
+                            <span class="lt-key-primary-tag">Mặc định</span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          class="lt-key-del-btn"
+                          title="Xóa key này"
+                          onClick={() => handleRemoveKey(item.id)}
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="3 6 5 6 21 6"/>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                          </svg>
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Trạng thái Router tương ứng với provider đang chọn */}
+                <div class="lt-router-status-note">
+                  {modalProviderKeys.length >= 2 ? (
+                    <div class="lt-router-alert lt-router-active">
+                      🟢 <strong>Đang kích hoạt Smart Router ({modalProviderKeys.length} keys):</strong> Tự động xoay vòng sang key kế tiếp khi một key bị limit (429/quota).
+                    </div>
+                  ) : modalProviderKeys.length === 1 ? (
+                    <div class="lt-router-alert lt-router-single">
+                      ℹ️ <strong>Sử dụng 1 key đơn lẻ:</strong> Khi chạm hạn mức (429/quota), hệ thống sẽ thông báo lỗi trực tiếp thay vì xoay vòng.
+                    </div>
+                  ) : (
+                    <div class="lt-router-alert lt-router-empty">
+                      ⚠️ <strong>Chưa có API key:</strong> Cần thêm ít nhất 1 key cho {pendingProvider === 'gemini' ? 'Google Gemini' : 'OpenCode Zen'} để sử dụng tính năng dịch.
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Tùy chọn số luồng dịch song song (Concurrency) */}
@@ -1237,18 +1351,18 @@ export function ViewerApp() {
                 <div class="lt-setting-desc">
                   Số worker dịch đồng thời theo hàng đợi thác nước. Khuyên dùng 5 trang để đọc nhanh mà không nghẽn mạng.
                 </div>
-                <select
-                  class="lt-setting-select"
+                <CustomSelect
                   value={pendingConcurrency}
-                  onChange={(e) => setPendingConcurrency(Number((e.target as HTMLSelectElement).value))}
-                >
-                  <option value={2}>2 trang song song</option>
-                  <option value={3}>3 trang song song</option>
-                  <option value={4}>4 trang song song</option>
-                  <option value={5}>5 trang song song (Mặc định)</option>
-                  <option value={6}>6 trang song song</option>
-                  <option value={7}>7 trang song song (Tối đa)</option>
-                </select>
+                  options={[
+                    { value: 2, label: '2 trang song song' },
+                    { value: 3, label: '3 trang song song' },
+                    { value: 4, label: '4 trang song song' },
+                    { value: 5, label: '5 trang song song (Mặc định, tối ưu)' },
+                    { value: 6, label: '6 trang song song' },
+                    { value: 7, label: '7 trang song song (Tối đa)' },
+                  ]}
+                  onChange={(val) => setPendingConcurrency(Number(val))}
+                />
               </div>
 
               {/* Reset Layouts & Caches in settings */}
@@ -1289,6 +1403,87 @@ export function ViewerApp() {
               <button class="lt-btn lt-btn-primary" onClick={applySettingsModal}>
                 Lưu & Áp dụng
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POST-SAVE ACTION POPUP MODAL (Lựa chọn dịch lại sau khi lưu API key) */}
+      {isPostSavePromptOpen && (
+        <div class="lt-modal-backdrop" onClick={() => setIsPostSavePromptOpen(false)}>
+          <div class="lt-modal-card lt-modal-card-sm" onClick={(e) => e.stopPropagation()}>
+            <div class="lt-modal-header">
+              <div class="lt-modal-title">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                  <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+                <span>Đã lưu API Key thành công!</span>
+              </div>
+              <button
+                class="lt-modal-close-btn"
+                onClick={() => setIsPostSavePromptOpen(false)}
+                title="Đóng"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"/>
+                  <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+
+            <div class="lt-modal-body">
+              <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#e4e4e7', lineHeight: '1.5' }}>
+                Bạn đã cập nhật cấu hình API Key. Bạn muốn áp dụng vào tài liệu đang mở như thế nào?
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <button
+                  class="lt-btn lt-btn-primary"
+                  style={{ justifyContent: 'flex-start', padding: '10px 14px', textAlign: 'left', gap: '12px' }}
+                  onClick={() => {
+                    setIsPostSavePromptOpen(false);
+                    retryVisionPage(currentPage);
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                  </svg>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>Dịch lại Trang hiện tại (Trang {currentPage})</div>
+                    <div style={{ fontSize: '11px', color: '#bae6fd' }}>Ưu tiên dịch ngay trang bạn đang xem với API Key mới</div>
+                  </div>
+                </button>
+
+                <button
+                  class="lt-btn"
+                  style={{ justifyContent: 'flex-start', padding: '10px 14px', textAlign: 'left', gap: '12px', background: '#27272a', borderColor: '#3f3f46' }}
+                  onClick={() => {
+                    setIsPostSavePromptOpen(false);
+                    retranslateAll();
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
+                    <path d="M21 3v5h-5"/>
+                  </svg>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>Dịch lại Toàn bộ tài liệu</div>
+                    <div style={{ fontSize: '11px', color: '#a1a1aa' }}>Xóa toàn bộ cache cũ và khởi động lại dịch từ Trang 1</div>
+                  </div>
+                </button>
+
+                <button
+                  class="lt-btn"
+                  style={{ padding: '8px 12px', color: '#a1a1aa' }}
+                  onClick={() => {
+                    setIsPostSavePromptOpen(false);
+                    processVisionQueue();
+                  }}
+                >
+                  Để sau (tiếp tục đọc bình thường)
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1487,6 +1682,34 @@ export function ViewerApp() {
                 flex: 'none',
               }}
             >
+              {/* WARNING BANNER NẾU CHƯA CÓ API KEY */}
+              {!hasActiveKey && (
+                <div class="lt-api-key-warning-banner">
+                  <div class="lt-warning-left">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+                      <line x1="12" y1="9" x2="12" y2="13"/>
+                      <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    <div>
+                      <div class="lt-warning-title">
+                        Cảnh báo: Chưa cấu hình {settings.pdfProvider === 'zen' ? 'OpenCode Zen' : 'Google Gemini'} API Key
+                      </div>
+                      <div class="lt-warning-sub">
+                        Hệ thống tạm dừng tiến trình dịch ngầm. Vui lòng thêm API Key để hệ thống dịch tài liệu sang tiếng Việt kèm công thức KaTeX.
+                      </div>
+                    </div>
+                  </div>
+                  <button class="lt-btn lt-btn-warning" onClick={() => setIsSettingsOpen(true)}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="3"/>
+                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                    <span>Cấu hình API Key</span>
+                  </button>
+                </div>
+              )}
+
               {Array.from({ length: numPages }).map((_, idx) => {
                 const pno = idx + 1;
                 if (readerMode === 'whiteboard') {
@@ -1517,6 +1740,7 @@ export function ViewerApp() {
                     markdownText={pageVisionTranslations[pno] || ''}
                     status={pageVisionStatus[pno] || 'loading'}
                     errorMsg={pageVisionErrors[pno] || ''}
+                    hasApiKey={hasActiveKey}
                     blocks={pageBlocks[pno] || []}
                     onVisible={debouncedPrioritizePage}
                     onRetry={retryVisionPage}

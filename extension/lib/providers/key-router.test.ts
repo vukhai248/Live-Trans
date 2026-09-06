@@ -49,4 +49,24 @@ describe('KeyRouter', () => {
 
     expect(calls).toEqual(['k1']);
   });
+
+  it('accepts array of keys', () => {
+    const router = new KeyRouter(['keyA', 'keyB', 'keyC']);
+    expect(router.keyCount).toBe(3);
+    expect(router.getAllKeys()).toEqual(['keyA', 'keyB', 'keyC']);
+  });
+
+  it('immediately throws rate limit error without rotating when only 1 key is present', async () => {
+    const router = new KeyRouter(['single-key']);
+    const calls: string[] = [];
+
+    await expect(
+      router.execute(async (key) => {
+        calls.push(key);
+        throw new Error('429 RESOURCE_EXHAUSTED: Rate limit exceeded');
+      }),
+    ).rejects.toThrow('Đã chạm hạn mức Rate Limit (429) hoặc Quota của API Key');
+
+    expect(calls).toEqual(['single-key']);
+  });
 });

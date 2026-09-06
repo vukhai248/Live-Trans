@@ -13,6 +13,7 @@ export interface VisionPageRendererProps {
   status?: 'loading' | 'done' | 'error' | 'queued';
   isPriority?: boolean;
   errorMsg?: string;
+  hasApiKey?: boolean;
   blocks?: TextBlock[];
   onVisible: (pageNumber: number) => void;
   onRetry?: (pageNumber: number) => void;
@@ -26,6 +27,7 @@ export function VisionPageRenderer({
   status = 'loading',
   isPriority = false,
   errorMsg = '',
+  hasApiKey = true,
   blocks,
   onVisible,
   onRetry,
@@ -189,19 +191,24 @@ export function VisionPageRenderer({
       <div class="lt-vision-header">
         <div class="lt-vision-header-left">
           <span class="lt-page-tag">Trang {pageNumber}</span>
-          {status === 'loading' && (
+          {!hasApiKey && !markdownText && (
+            <span class="lt-status-badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+              ⚠️ Chờ cấu hình API Key
+            </span>
+          )}
+          {hasApiKey && status === 'loading' && (
             <span class="lt-status-badge lt-status-loading">
               <div class="lt-spinner" style={{ width: '11px', height: '11px', borderTopColor: '#38bdf8' }} />
               {isPriority ? `⚡ Đang ưu tiên dịch Trang ${pageNumber}...` : `Đang trích xuất & dịch Trang ${pageNumber}...`}
             </span>
           )}
-          {status === 'queued' && isPriority && (
+          {hasApiKey && status === 'queued' && isPriority && (
             <span class="lt-status-badge lt-status-priority" style={{ background: 'rgba(245, 158, 11, 0.18)', color: '#d97706', border: '1px solid rgba(245, 158, 11, 0.35)' }}>
               <div class="lt-spinner" style={{ width: '11px', height: '11px', borderTopColor: '#d97706' }} />
               ⚡ Đã ưu tiên! Sẽ dịch ngay khi tiến trình hiện tại xong...
             </span>
           )}
-          {status === 'queued' && !isPriority && (
+          {hasApiKey && status === 'queued' && !isPriority && (
             <span class="lt-status-badge lt-status-queued">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="10"/>
@@ -265,7 +272,21 @@ export function VisionPageRenderer({
 
       {/* CONTENT BODY - INDEPENDENT INTERNAL SCROLL */}
       <div ref={bodyRef} class="lt-vision-body">
-        {status === 'loading' || status === 'queued' ? (
+        {!hasApiKey && !markdownText ? (
+          <div class="lt-vision-empty-state">
+            <div class="lt-empty-icon">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </div>
+            <div class="lt-empty-title">Chưa thể dịch Trang {pageNumber}</div>
+            <div class="lt-empty-desc">
+              Chưa có API Key được cấu hình. Vui lòng bấm vào nút "Cấu hình API Key" trên thanh cảnh báo hoặc nút bánh răng cài đặt để thêm key.
+            </div>
+          </div>
+        ) : status === 'loading' || status === 'queued' ? (
           <div class="lt-vision-skeleton">
             {status === 'queued' && isPriority && (
               <div style={{ color: '#d97706', fontSize: '12px', fontWeight: 600, marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>

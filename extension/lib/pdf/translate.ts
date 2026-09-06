@@ -1,4 +1,4 @@
-import type { Settings } from '../settings';
+import { type Settings, getProviderKeys } from '../settings';
 import type { TextBlock, TranslatedBlock, PageTranslationResult } from './types';
 import { fetchWithRetry } from '../providers/fetch-retry';
 import { getKeyRouter } from '../providers/key-router';
@@ -9,20 +9,14 @@ const FLASH_LITE_MODEL = 'gemini-3.5-flash-lite';
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const ZEN_BASE_URL = 'https://opencode.ai/zen/v1';
 
-declare const __BUILTIN_ZEN_API_KEY__: string | undefined;
-
 /** Model Zen nào dùng Responses API (muse-spark-*), còn lại dùng chat/completions. */
 export function isZenResponsesModel(model: string): boolean {
   return model.startsWith('muse-spark');
 }
 
 export function getZenKey(settings: Settings): string {
-  const user = settings.zenApiKey?.trim();
-  if (user) return user;
-  if (typeof __BUILTIN_ZEN_API_KEY__ !== 'undefined' && __BUILTIN_ZEN_API_KEY__) {
-    return __BUILTIN_ZEN_API_KEY__;
-  }
-  return '';
+  const keys = getProviderKeys(settings, 'zen');
+  return keys[0] || '';
 }
 
 /** Trích text dịch từ OpenAI Responses API (muse-spark-* qua Zen). */
@@ -342,7 +336,7 @@ async function translateSentenceBatchDirect(
     return translateSentenceBatchZen(items, targetLang, settings);
   }
 
-  const router = getKeyRouter(settings.apiKey);
+  const router = getKeyRouter(getProviderKeys(settings, 'gemini'));
   if (router.keyCount === 0) {
     throw new Error('Chưa cấu hình Gemini API Key');
   }

@@ -1,5 +1,5 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import type { Settings } from '../settings';
+import { type Settings, getProviderKeys } from '../settings';
 import { fetchWithRetry } from '../providers/fetch-retry';
 import { getKeyRouter } from '../providers/key-router';
 import {
@@ -597,7 +597,7 @@ ${markdown}`;
   }
 
   // 2. Fallback / Default: Gemini text translation pass
-  const router = getKeyRouter(settings.apiKey);
+  const router = getKeyRouter(getProviderKeys(settings, 'gemini'));
   if (router.keyCount > 0) {
     try {
       const repaired = await router.execute(async (activeApiKey) => {
@@ -660,7 +660,7 @@ export async function translatePageVision(
     }
   }
 
-  const router = getKeyRouter(settings.apiKey);
+  const router = getKeyRouter(getProviderKeys(settings, 'gemini'));
   if (router.keyCount === 0) {
     throw new Error('Chưa cấu hình Gemini API Key. Vui lòng vào Cài đặt để nhập API Key.');
   }
