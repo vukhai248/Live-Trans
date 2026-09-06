@@ -414,7 +414,7 @@ export function shieldTokens(items: Record<string, string>): {
   const mathPatterns = [
     /\$[^$]+\$/g, // LaTeX inline dollar sign $...$
     /(?:\\Delta\s*[a-zA-Z0-9_]+|\\hat\{[a-zA-Z0-9_]+\}(?:_[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?(?:\^[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?|\\tilde\{[a-zA-Z0-9_]+\}(?:_[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?(?:\^[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)?|\\epsilon_\\theta(?:\([^)]*\))?|\\ell(?:\([^)]*\))?)(?!\w)/gi,
-    /\{[a-zA-Z0-9_\\α-ωΑ-Ω]+\}(?:[_\^]?[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)*/g, // {\alpha_t}_{t=1}^T or {a_T}
+    /\{[a-zA-Z0-9_\\α-ωΑ-Ω]+\}(?:[_^]?[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)*/g, // {\alpha_t}_{t=1}^T or {a_T}
     /(?<![\p{L}\p{N}])(?:z_0|z0|z_t|zt|x_0|x0|x_t|xt|y_n|w_t|z_\{t-1\}|z_\{0\}|x_\{t\}|x_\{0\}|D\^[ST]|q\(|p\(|N\([^)]*\))(?![\p{L}\p{N}])/gu,
     /(?<![\p{L}\p{N}])(?:[a-zA-Z]_[0-9a-zA-Z]+|[a-zA-Z]\^[0-9a-zA-Z]+)(?![\p{L}\p{N}])/gu, // z_0, x_t, D^S
     /(?:(?<![\p{L}\p{N}])[fgh]\([a-zA-Z0-9_\\]+\)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])[a-zA-Z]'(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])\([fgh]\s*,\s*(?:1|l|\\ell)\)(?![\p{L}\p{N}]))/gu, // f(x), c', x', (f, \ell)

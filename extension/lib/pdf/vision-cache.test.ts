@@ -4,11 +4,7 @@ import {
   setCachedVisionTranslation,
   clearCachedVisionTranslation,
   clearAllVisionCache,
-  pruneVisionCacheRegistry,
   getVisionCacheStats,
-  MAX_CACHED_PAPERS,
-  CACHE_TTL_MS,
-  VISION_REGISTRY_KEY,
 } from './vision-translate';
 
 class MockStorage implements Storage {

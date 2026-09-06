@@ -83,7 +83,7 @@ export function wrapInlineMath(text: string): string {
     return `⟦PROT_${idx}⟧`;
   });
   res = res.replace(
-    /\{[a-zA-Z0-9_\\α-ωΑ-Ω]+\}(?:[_\^]?[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)*/g,
+    /\{[a-zA-Z0-9_\\α-ωΑ-Ω]+\}(?:[_^]?[a-zA-Z0-9={}^\\α-ωΑ-Ω]+)*/g,
     (m) => `$${m}$`,
   );
 

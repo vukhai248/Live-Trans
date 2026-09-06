@@ -444,11 +444,6 @@ export function ViewerApp() {
     }, 300);
   }, [prioritizeVisionPage]);
 
-  // Tương thích ngược với các caller cũ
-  const triggerVisionTranslation = (pageNumber: number, force = false) => {
-    prioritizeVisionPage(pageNumber, force);
-  };
-
   const retryVisionPage = (pageNumber: number) => {
     clearCachedVisionTranslation(pdfUrl, pageNumber);
     setPageVisionTranslations((prev) => {
@@ -540,7 +535,6 @@ export function ViewerApp() {
       if (left.scrollTop >= top - 24 && left.scrollTop < top + height) {
         bestPno = pno;
         pageOffsetRatio = Math.max(0, Math.min(1, (left.scrollTop - top) / height));
-        minDistance = 0;
         break;
       }
 
@@ -599,7 +593,6 @@ export function ViewerApp() {
       if (right.scrollTop >= top - 24 && right.scrollTop < top + height) {
         bestPno = pno;
         pageOffsetRatio = Math.max(0, Math.min(1, (right.scrollTop - top) / height));
-        minDistance = 0;
         break;
       }
 
@@ -708,22 +701,6 @@ export function ViewerApp() {
       return next;
     });
     void triggerPageTranslation(pageNumber, true);
-  };
-
-  const hasPendingChange =
-    pendingProvider !== settings.pdfProvider || pendingModel !== settings.pdfModel;
-
-  // Áp dụng provider/model mới: chỉ các trang CHƯA dịch dùng model mới,
-  // trang đã dịch giữ nguyên (cache key đã tách theo provider+model).
-  const applyProviderModel = () => {
-    const validModels = pendingProvider === 'zen' ? PDF_ZEN_MODELS : PDF_GEMINI_MODELS;
-    const pdfModel = (validModels as readonly string[]).includes(pendingModel)
-      ? pendingModel
-      : DEFAULT_PDF_MODEL[pendingProvider];
-    const next = { ...settings, pdfProvider: pendingProvider, pdfModel };
-    setSettings(next);
-    setPendingModel(pdfModel);
-    void saveSettings(next);
   };
 
   const applySettingsModal = () => {

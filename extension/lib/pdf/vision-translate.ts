@@ -186,7 +186,6 @@ function removePaperKeys(entry: PaperRegistryEntry): void {
 export function pruneVisionCacheRegistry(registry?: VisionCacheRegistry): VisionCacheRegistry {
   const reg = registry || loadRegistry();
   const now = Date.now();
-  let changed = false;
 
   // 1. Dọn dẹp các bài quá hạn 14 ngày
   for (const url of Object.keys(reg.papers)) {
@@ -194,7 +193,6 @@ export function pruneVisionCacheRegistry(registry?: VisionCacheRegistry): Vision
     if (entry && now - entry.lastAccessed > CACHE_TTL_MS) {
       removePaperKeys(entry);
       delete reg.papers[url];
-      changed = true;
     }
   }
 
@@ -205,7 +203,6 @@ export function pruneVisionCacheRegistry(registry?: VisionCacheRegistry): Vision
     if (oldest) {
       removePaperKeys(oldest);
       delete reg.papers[oldest.url];
-      changed = true;
     }
   }
 

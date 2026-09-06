@@ -23,6 +23,8 @@ export default tseslint.config(
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
       '@typescript-eslint/no-explicit-any': 'off',
+      'no-empty': ['error', { allowEmptyCatch: true }],
+      'no-control-regex': 'off',
     },
   },
 );

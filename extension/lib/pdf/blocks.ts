@@ -285,13 +285,7 @@ function buildLine(items: NormalizedItem[], dividerX: number, viewportWidth: num
   const w = maxX - minX;
 
   // Column determination
-  let col = 0;
-  if (w > viewportWidth * 0.65) {
-    col = 0; // Full-width
-  } else {
-    const centerX = (minX + maxX) / 2;
-    col = centerX < dividerX ? 1 : 2;
-  }
+  const col = w > viewportWidth * 0.65 ? 0 : (minX + maxX) / 2 < dividerX ? 1 : 2;
 
   return {
     text: text.trim(),
@@ -509,7 +503,7 @@ function isCaptionStartLine(text: string): boolean {
 function isReferenceStartLine(text: string): boolean {
   const t = text.trim();
   if (/^\[\d+\]\s+[A-Z]/.test(t)) return true;
-  if (/^[A-Z][a-zA-Z'\-]+,\s+[A-Z]\./.test(t)) return true;
+  if (/^[A-Z][a-zA-Z'-]+,\s+[A-Z]\./.test(t)) return true;
   return false;
 }
 
@@ -593,7 +587,7 @@ export function groupIntoBlocks(lines: LineItem[], pageNumber: number): TextBloc
     const lineSpacing = curr.y - (prev.y + prev.h);
     const fontDiff = Math.abs(curr.fontSize - prev.fontSize);
 
-    let isConsecutive = false;
+    let isConsecutive: boolean;
 
     if (inAlgorithm) {
       // While inside an algorithm box:
@@ -665,7 +659,7 @@ export function groupIntoBlocks(lines: LineItem[], pageNumber: number): TextBloc
       const isIndented = curr.x > baseColX + 4.5;
       const prevEndsShort = maxColW > 100 && prev.w < maxColW - 18;
       const hasExtraSpacing = lineSpacing >= Math.max(prev.h, curr.h) * 1.18 && lineSpacing <= maxAllowedSpacing;
-      const currStartsSentence = /^[A-Z0-9"“'‘•\-]/.test(curr.text.trim());
+      const currStartsSentence = /^[A-Z0-9"“'‘•-]/.test(curr.text.trim());
 
       const isParagraphBreak =
         !isPrevFormula &&
