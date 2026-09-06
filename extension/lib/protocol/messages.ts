@@ -46,7 +46,8 @@ export type RuntimeMessage =
       videoTitle?: string;
       mediaCount: number;
     }
-  | { type: 'FORWARD_TO_TAB'; tabId: number; message: RuntimeMessage };
+  | { type: 'FORWARD_TO_TAB'; tabId: number; message: RuntimeMessage }
+  | { type: 'OPEN_VIEWER'; pdfUrl: string };
 
 export const INITIAL_STATE: SessionState = {
   status: 'idle',

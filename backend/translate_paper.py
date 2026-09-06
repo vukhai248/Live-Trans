@@ -42,17 +42,42 @@ body { font-family: noto; margin: 0; font-size: 9.5pt; line-height: 1.22; }
 """
 
 
-# ---------------------------------------------------------------- env & key
+API_KEYS: list[str] = []
+CURRENT_KEY_IDX = 0
 
-def load_api_key() -> str:
+def load_api_keys() -> list[str]:
+    keys = []
     env_file = ROOT / ".env"
     if env_file.exists():
-        m = re.search(r"^GEMINI_API_KEY=(.+)$", env_file.read_text(encoding="utf-8"), re.M)
-        if m:
-            return m.group(1).strip()
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            m = re.search(r"^GEMINI_API_KEY(_\d+)?\s*=\s*(.+)$", line)
+            if m:
+                k = m.group(2).strip()
+                if k and k not in keys:
+                    keys.append(k)
     import os
+    env_k = os.environ.get("GEMINI_API_KEY", "")
+    if env_k and env_k not in keys:
+        keys.append(env_k)
+    return keys
 
-    return os.environ.get("GEMINI_API_KEY", "")
+
+def get_current_client() -> genai.Client:
+    global CURRENT_KEY_IDX, API_KEYS
+    if not API_KEYS:
+        API_KEYS = load_api_keys()
+    if not API_KEYS:
+        raise RuntimeError("Thiếu GEMINI_API_KEY (đặt trong .env ở gốc repo)")
+    key = API_KEYS[CURRENT_KEY_IDX % len(API_KEYS)]
+    return genai.Client(api_key=key)
+
+
+def rotate_key() -> genai.Client:
+    global CURRENT_KEY_IDX, API_KEYS
+    if len(API_KEYS) > 1:
+        CURRENT_KEY_IDX = (CURRENT_KEY_IDX + 1) % len(API_KEYS)
+        print(f"    [KeyRouter] Xoay sang API Key #{CURRENT_KEY_IDX + 1}/{len(API_KEYS)}...")
+    return get_current_client()
 
 
 def load_glossary() -> list[dict]:
@@ -189,6 +214,10 @@ def translate_batch(
             return out
         except Exception as e:  # 429 quota / mạng / JSON hỏng
             msg = str(e)
+            is_quota = "429" in msg or "quota" in msg.lower() or "resource_exhausted" in msg.lower()
+            if is_quota and len(API_KEYS) > 1:
+                client = rotate_key()
+                continue
             wait_m = RETRY_IN_RE.search(msg)
             if wait_m and attempt < MAX_429_RETRIES:
                 wait = min(float(wait_m.group(1)) + 1.0, 65.0)
@@ -294,20 +323,20 @@ def main() -> int:
     global BATCH_SIZE
     BATCH_SIZE = max(1, args.batch)
 
-    key = load_api_key()
-    if not key:
-        print("Thiếu GEMINI_API_KEY (đặt trong .env ở gốc repo)")
+    try:
+        client = get_current_client()
+    except Exception as e:
+        print(e)
         return 2
 
     name, data = fetch_pdf(args.src)
     doc = pymupdf.open(stream=data, filetype="pdf")
     pages = parse_pages(args.pages, len(doc))
-    print(f"Paper: {doc.metadata.get('title') or name} — {len(doc)} trang, dịch {len(pages)} trang")
+    print(f"Paper: {doc.metadata.get('title') or name} — {len(doc)} trang, dịch {len(pages)} trang (Pool {len(API_KEYS)} API Keys)")
 
     blocks = extract_blocks(doc, pages)
     print(f"Tách được {len(blocks)} text block")
 
-    client = genai.Client(api_key=key)
     glossary = load_glossary()
     blocks = translate_all(client, blocks, glossary, args.lang)
 

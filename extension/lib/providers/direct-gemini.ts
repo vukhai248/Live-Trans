@@ -11,6 +11,7 @@ import { parseTranscribeResult } from '../asr/parser';
 import { pcmBase64ToWavBase64 } from '../capture/wav';
 import { buildTranslatePrompt, parseTranslateBatch } from '../translate/prompt';
 import { fetchWithRetry } from './fetch-retry';
+import { getKeyRouter } from './key-router';
 
 const TRANSCRIBE_MODEL = 'gemini-3.5-transcribe';
 const FLASH_MODEL = 'gemini-3.5-flash';
@@ -81,10 +82,7 @@ export class DirectGeminiProvider implements Provider {
     req: TranscribeRequest,
     settings: Settings,
   ): Promise<ReturnType<typeof parseTranscribeResult>> {
-    // gemini-3.5-transcribe qua Interactions API, audio INLINE base64 (đã xác
-    // minh thật 2026-09-02: 200 OK, có word timestamps ở steps[].content[].annotations[],
-    // KHÔNG cần Files upload → không vướng CORS upload). Verbatim + word
-    // timestamps là bắt buộc để phụ đề khớp mốc thời gian (plan §3, M1 acceptance).
+    const router = getKeyRouter(settings.apiKey);
     const wavBase64 = pcmBase64ToWavBase64(req.pcmBase64);
 
     const body: Record<string, any> = {
@@ -97,12 +95,15 @@ export class DirectGeminiProvider implements Provider {
         },
       },
     };
-    const data = await jsonFetch(`${BASE}/interactions`, {
-      method: 'POST',
-      headers: { 'x-goog-api-key': settings.apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+
+    return router.execute(async (activeKey) => {
+      const data = await jsonFetch(`${BASE}/interactions`, {
+        method: 'POST',
+        headers: { 'x-goog-api-key': activeKey.trim(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return parseTranscribeResult(data);
     });
-    return parseTranscribeResult(data);
   }
 
   async translate(
@@ -117,6 +118,7 @@ export class DirectGeminiProvider implements Provider {
     settings: Settings,
     buildPrompt: (r: TranslateBatchRequest) => string,
   ): Promise<TranslateBatchResponse> {
+    const router = getKeyRouter(settings.apiKey);
     const url = `${BASE}/models/${FLASH_MODEL}:generateContent`;
     const body = {
       contents: [{ role: 'user', parts: [{ text: buildPrompt(req) }] }],
@@ -125,29 +127,36 @@ export class DirectGeminiProvider implements Provider {
         response_mime_type: 'application/json',
       },
     };
-    const data = await jsonFetch(url, {
-      method: 'POST',
-      headers: { 'x-goog-api-key': settings.apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+
+    return router.execute(async (activeKey) => {
+      const data = await jsonFetch(url, {
+        method: 'POST',
+        headers: { 'x-goog-api-key': activeKey.trim(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      return parseTranslateBatch(text, req.units.length);
     });
-    const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-    return parseTranslateBatch(text, req.units.length);
   }
 
   async translateTitle(title: string, settings: Settings): Promise<string> {
+    const router = getKeyRouter(settings.apiKey);
     const url = `${BASE}/models/${FLASH_MODEL}:generateContent`;
     const prompt = `Dịch tiêu đề video sau sang tiếng Việt cho tự nhiên, giữ nguyên tên riêng, tên thương hiệu và mã/định danh. Chỉ trả về tiêu đề đã dịch, không giải thích.\n\nTiêu đề: ${title}`;
     const body = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generation_config: { temperature: 0.2 },
     };
-    const data = await jsonFetch(url, {
-      method: 'POST',
-      headers: { 'x-goog-api-key': settings.apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+
+    return router.execute(async (activeKey) => {
+      const data = await jsonFetch(url, {
+        method: 'POST',
+        headers: { 'x-goog-api-key': activeKey.trim(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      return text.trim();
     });
-    const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-    return text.trim();
   }
 }
 

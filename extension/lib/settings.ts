@@ -3,6 +3,22 @@ import { EMPTY_GLOSSARY, type GlossaryDoc } from './glossary/types';
 
 export type ProviderMode = 'direct' | 'gateway' | 'demo';
 
+/** Provider dịch PDF/paper: gemini (direct) hoặc zen (OpenCode Zen gateway). */
+export type PdfProvider = 'gemini' | 'zen';
+
+export const PDF_GEMINI_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.5-flash'] as const;
+export const PDF_ZEN_MODELS = [
+  'muse-spark-1.2-contributor-free',
+  'muse-spark-1.3-contributor-free',
+  'big-pickle',
+  'deepseek-v4-flash-free',
+] as const;
+
+export const DEFAULT_PDF_MODEL: Record<PdfProvider, string> = {
+  gemini: 'gemini-3.5-flash-lite',
+  zen: 'muse-spark-1.2-contributor-free',
+};
+
 export interface Settings {
   /** direct = call Gemini from offscreen with user key; gateway = local proxy;
    *  demo = offline mock so the UI works without a key. */
@@ -21,6 +37,12 @@ export interface Settings {
   showTranslatedTitle: boolean;
   fontSize: 'small' | 'medium' | 'large';
   glossary: GlossaryDoc;
+  /** Provider dịch PDF/paper (toolbar viewer). */
+  pdfProvider: PdfProvider;
+  /** Model dịch PDF/paper tương ứng provider. */
+  pdfModel: string;
+  /** User's own OpenCode Zen API key (dự phòng khi Gemini ốm). */
+  zenApiKey: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -34,6 +56,9 @@ export const DEFAULT_SETTINGS: Settings = {
   showTranslatedTitle: true,
   fontSize: 'medium',
   glossary: EMPTY_GLOSSARY,
+  pdfProvider: 'gemini',
+  pdfModel: DEFAULT_PDF_MODEL.gemini,
+  zenApiKey: '',
 };
 
 export function clampChunk(seconds: number): number {

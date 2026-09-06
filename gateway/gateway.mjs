@@ -17,28 +17,60 @@ const FLASH_MODEL = 'gemini-3.5-flash';
 const TRANSCRIBE_MODEL = 'gemini-3.5-transcribe';
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
-async function apiKey() {
-  if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY;
-  try {
-    const env = await readFile(new URL('./.env', import.meta.url), 'utf8');
-    const m = env.match(/^GEMINI_API_KEY=(.+)$/m);
-    if (m) return m[1].trim();
-  } catch {
-    /* no .env */
+let apiKeys = [];
+let currentKeyIdx = 0;
+
+async function loadApiKeys() {
+  if (apiKeys.length > 0) return apiKeys;
+  const keys = [];
+  if (process.env.GEMINI_API_KEY) keys.push(process.env.GEMINI_API_KEY);
+  for (const p of [new URL('./.env', import.meta.url), new URL('../.env', import.meta.url)]) {
+    try {
+      const env = await readFile(p, 'utf8');
+      for (const line of env.split(/\r?\n/)) {
+        const m = line.match(/^GEMINI_API_KEY(_\d+)?\s*=\s*(.+)$/);
+        if (m && m[2]) {
+          const k = m[2].trim();
+          if (k && !keys.includes(k)) keys.push(k);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
   }
-  return '';
+  apiKeys = keys;
+  return apiKeys;
+}
+
+async function apiKey() {
+  const keys = await loadApiKeys();
+  if (keys.length === 0) return '';
+  return keys[currentKeyIdx % keys.length];
+}
+
+function rotateApiKey() {
+  if (apiKeys.length > 1) {
+    currentKeyIdx = (currentKeyIdx + 1) % apiKeys.length;
+    console.log(`[Gateway] Xoay sang API Key #${currentKeyIdx + 1}/${apiKeys.length}...`);
+  }
 }
 
 async function gemini(path, body, key) {
+  const activeKey = key || (await apiKey());
   const url = `${BASE}/models/${path}`;
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+    headers: { 'x-goog-api-key': activeKey, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(`Gemini ${res.status}: ${t.slice(0, 300)}`);
+    if (res.status === 429 && apiKeys.length > 1) {
+      rotateApiKey();
+      const nextKey = await apiKey();
+      return gemini(path, body, nextKey);
+    }
+    throw new Error(`Gemini ${res.status}: ${t}`);
   }
   return res.json();
 }

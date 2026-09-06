@@ -145,6 +145,24 @@ export default defineBackground(() => {
             // Offscreen không có chrome.tabs — worker forward hộ tới content script.
             browser.tabs.sendMessage(message.tabId, message.message).catch(() => {});
             break;
+          case 'OPEN_VIEWER': {
+            // Mở viewer qua background (tabs.create) thay vì window.open từ content
+            // script — window.open từ page context bị adblock/popup-blocker chặn
+            // (ERR_BLOCKED_BY_CLIENT), còn tabs.create thì không bao giờ bị chặn.
+            let targetUrl = message.pdfUrl || '';
+            if (targetUrl.includes('arxiv.org/abs/')) {
+              const match = targetUrl.match(/arxiv\.org\/abs\/([0-9]+\.[0-9]+(v[0-9]+)?)/i);
+              if (match?.[1]) {
+                targetUrl = `https://arxiv.org/pdf/${match[1]}.pdf`;
+              }
+            }
+            const viewerUrl = browser.runtime.getURL(
+              `/viewer.html?url=${encodeURIComponent(targetUrl)}`,
+            );
+            await browser.tabs.create({ url: viewerUrl });
+            sendResponse(state);
+            break;
+          }
           case 'STATE_UPDATE':
             state = { ...state, ...message.state };
             break;
@@ -155,4 +173,31 @@ export default defineBackground(() => {
       return true; // keep the channel open for async sendResponse
     },
   );
+
+  // Context Menu for right-click on any page / link to translate PDF
+  try {
+    browser.contextMenus.create({
+      id: 'lt-translate-pdf',
+      title: '📄 Dịch Paper này với Live-Trans (Song ngữ)',
+      contexts: ['page', 'link'],
+    });
+  } catch {
+    /* ignore if already created */
+  }
+
+  browser.contextMenus.onClicked.addListener((info, tab) => {
+    if (info.menuItemId === 'lt-translate-pdf') {
+      let targetUrl = info.linkUrl || info.pageUrl || tab?.url || '';
+      if (targetUrl) {
+        if (targetUrl.includes('arxiv.org/abs/')) {
+          const match = targetUrl.match(/arxiv\.org\/abs\/([0-9]+\.[0-9]+(v[0-9]+)?)/i);
+          if (match?.[1]) {
+            targetUrl = `https://arxiv.org/pdf/${match[1]}.pdf`;
+          }
+        }
+        const viewerUrl = browser.runtime.getURL(`/viewer.html?url=${encodeURIComponent(targetUrl)}`);
+        browser.tabs.create({ url: viewerUrl });
+      }
+    }
+  });
 });

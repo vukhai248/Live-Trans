@@ -35,6 +35,8 @@ interface MediaPresence {
   checked: boolean;
   hasVideo: boolean;
   hasAudio: boolean;
+  isPdf: boolean;
+  pdfUrl?: string;
   videoTitle?: string;
   mediaCount: number;
 }
@@ -54,6 +56,7 @@ export function App() {
     checked: false,
     hasVideo: false,
     hasAudio: false,
+    isPdf: false,
     mediaCount: 0,
   });
   const [hasSubtitles, setHasSubtitles] = useState(false);
@@ -112,11 +115,46 @@ export function App() {
     try {
       const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
       if (!activeTab?.id) {
-        setMediaInfo({ checked: true, hasVideo: false, hasAudio: false, mediaCount: 0 });
+        setMediaInfo({ checked: true, hasVideo: false, hasAudio: false, isPdf: false, mediaCount: 0 });
         return;
       }
 
       const url = activeTab.url || '';
+      let videoTitle = activeTab.title || '';
+
+      if (videoTitle) {
+        videoTitle = videoTitle.replace(/\s+-\s*(YouTube|Coursera|Udemy)\s*$/i, '').trim();
+      }
+
+      // Check if current tab is a PDF document or Arxiv paper
+      let isPdf = false;
+      let pdfUrl = '';
+
+      if (url.includes('arxiv.org/abs/')) {
+        isPdf = true;
+        const match = url.match(/arxiv\.org\/abs\/([0-9]+\.[0-9]+(v[0-9]+)?)/i);
+        pdfUrl = match?.[1] ? `https://arxiv.org/pdf/${match[1]}.pdf` : url.replace('/abs/', '/pdf/') + '.pdf';
+      } else if (url.includes('arxiv.org/pdf/')) {
+        isPdf = true;
+        pdfUrl = url.endsWith('.pdf') ? url : `${url}.pdf`;
+      } else if (/\.pdf(\?|#|$)/i.test(url) || (url.startsWith('file://') && url.toLowerCase().endsWith('.pdf'))) {
+        isPdf = true;
+        pdfUrl = url;
+      }
+
+      if (isPdf) {
+        setMediaInfo({
+          checked: true,
+          hasVideo: false,
+          hasAudio: false,
+          isPdf: true,
+          pdfUrl,
+          videoTitle: videoTitle || 'Tài liệu Paper PDF',
+          mediaCount: 0,
+        });
+        return;
+      }
+
       const isKnownVideoSite =
         url.includes('youtube.com/watch') ||
         url.includes('youtube.com/live') ||
@@ -129,11 +167,6 @@ export function App() {
       let hasVideo = isKnownVideoSite;
       let hasAudio = false;
       let mediaCount = isKnownVideoSite ? 1 : 0;
-      let videoTitle = activeTab.title || '';
-
-      if (videoTitle) {
-        videoTitle = videoTitle.replace(/\s+-\s*(YouTube|Coursera|Udemy)\s*$/i, '').trim();
-      }
 
       // 1. Direct Scripting Query on Active Tab
       try {
@@ -182,11 +215,12 @@ export function App() {
         checked: true,
         hasVideo,
         hasAudio,
+        isPdf: false,
         videoTitle: videoTitle || activeTab.title,
         mediaCount,
       });
     } catch {
-      setMediaInfo({ checked: true, hasVideo: false, hasAudio: false, mediaCount: 0 });
+      setMediaInfo({ checked: true, hasVideo: false, hasAudio: false, isPdf: false, mediaCount: 0 });
     }
   }
 
@@ -347,30 +381,120 @@ export function App() {
       {/* TAB 1: TRANSLATE */}
       {tab === 'translate' && (
         <div class="tab-content">
-          {/* Media Presence Detection Box */}
-          <div
-            class={`media-card ${
-              mediaInfo.hasVideo
-                ? 'media-found'
-                : mediaInfo.checked
-                  ? 'media-empty'
-                  : 'media-loading'
-            }`}
-          >
-            <div class="media-icon">{mediaInfo.hasVideo ? '🎬' : '📄'}</div>
-            <div class="media-details">
-              <div class="media-title">
-                {mediaInfo.hasVideo
-                  ? 'Phát hiện Video trên trang này'
-                  : 'Không tìm thấy video/audio trên tab này'}
+          {/* PDF MODE: Shown when active tab is a PDF / Paper document */}
+          {mediaInfo.isPdf ? (
+            <div class="pdf-mode-container" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div class="media-card media-found" style={{ borderLeft: '4px solid #3b82f6', background: 'rgba(37, 99, 235, 0.12)' }}>
+                <div class="media-icon" style={{ fontSize: '24px' }}>📄</div>
+                <div class="media-details">
+                  <div class="media-title" style={{ color: '#93c5fd' }}>
+                    Phát hiện Paper / Tài liệu PDF
+                  </div>
+                  <div class="media-desc" style={{ color: '#f1f5f9', fontWeight: 600, fontSize: '13px', marginTop: '2px' }}>
+                    {mediaInfo.videoTitle || 'Paper PDF'}
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: 'var(--muted)', marginTop: '4px', wordBreak: 'break-all' }}>
+                    {mediaInfo.pdfUrl}
+                  </div>
+                </div>
               </div>
-              <div class="media-desc">
-                {mediaInfo.hasVideo
-                  ? mediaInfo.videoTitle || 'Sẵn sàng bắt luồng âm thanh để dịch trực tiếp.'
-                  : 'Tiện ích hiện hỗ trợ video (YouTube, Coursera...). Tính năng dịch tài liệu/PDF/Paper đang được phát triển.'}
+
+              {/* Translate Now Primary Button */}
+              <button
+                class="primary"
+                style={{
+                  background: 'linear-gradient(135deg, #2563eb, #7c3aed)',
+                  padding: '13px 18px',
+                  fontSize: '14px',
+                  fontWeight: 700,
+                  boxShadow: '0 8px 24px -4px rgba(37, 99, 235, 0.6)',
+                  border: 'none',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  borderRadius: '10px',
+                }}
+                onClick={async () => {
+                  const viewerUrl = browser.runtime.getURL(
+                    `/viewer.html?url=${encodeURIComponent(mediaInfo.pdfUrl!)}`,
+                  );
+                  await browser.tabs.create({ url: viewerUrl });
+                  window.close();
+                }}
+              >
+                🚀 Dịch Paper này (Translate Now)
+              </button>
+
+              {/* PDF Features Summary */}
+              <div
+                class="card"
+                style={{
+                  padding: '12px 14px',
+                  background: 'rgba(255, 255, 255, 0.04)',
+                  borderRadius: '8px',
+                  border: '1px solid var(--line)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                }}
+              >
+                <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text)' }}>
+                  Tính năng Trình xem Song ngữ:
+                </div>
+                <div style={{ fontSize: '11.5px', color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <div>📖 <b>3 chế độ xem:</b> Song ngữ 2 cột, Chỉ bản dịch, Chỉ bản gốc</div>
+                  <div>🎯 <b>Hover đối chiếu:</b> Rà chuột vào câu bên này, bên kia sáng tương ứng</div>
+                  <div>🤖 <b>Model:</b> Gemini 3.5 Flash-Lite (giữ nguyên hình ảnh, công thức toán)</div>
+                  <div>⚡ <b>Session Cache:</b> Lật lại trang đã dịch không tốn quota API</div>
+                </div>
               </div>
+
+              {/* Target Language Preference */}
+              <section class="rows">
+                <label class="row">
+                  <span>Ngôn ngữ dịch</span>
+                  <select
+                    value={settings.targetLang}
+                    onChange={(e) =>
+                      void patchSettings({
+                        targetLang: (e.target as HTMLSelectElement).value,
+                      })
+                    }
+                  >
+                    {LANGS.map((l) => (
+                      <option key={l.code} value={l.code}>
+                        {l.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </section>
             </div>
-          </div>
+          ) : (
+            <>
+              {/* Media Presence Detection Box for Video/Audio */}
+              <div
+                class={`media-card ${
+                  mediaInfo.hasVideo
+                    ? 'media-found'
+                    : mediaInfo.checked
+                      ? 'media-empty'
+                      : 'media-loading'
+                }`}
+              >
+                <div class="media-icon">{mediaInfo.hasVideo ? '🎬' : '📄'}</div>
+                <div class="media-details">
+                  <div class="media-title">
+                    {mediaInfo.hasVideo
+                      ? 'Phát hiện Video trên trang này'
+                      : 'Không tìm thấy video/audio trên tab này'}
+                  </div>
+                  <div class="media-desc">
+                    {mediaInfo.hasVideo
+                      ? mediaInfo.videoTitle || 'Sẵn sàng bắt luồng âm thanh để dịch trực tiếp.'
+                      : 'Nếu bạn đang xem tài liệu PDF hoặc bài báo Arxiv, tiện ích sẽ tự động phát hiện để mở Trình xem Song ngữ.'}
+                  </div>
+                </div>
+              </div>
 
           {/* Mode Warning Bar */}
           {settings.mode === 'demo' && (
@@ -529,8 +653,10 @@ export function App() {
               />
             </label>
           </section>
-        </div>
+        </>
       )}
+    </div>
+  )}
 
       {/* TAB 2: SETTINGS (KEY & MODE) */}
       {tab === 'settings' && (

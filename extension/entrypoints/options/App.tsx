@@ -129,6 +129,19 @@ function General({
         </Field>
       )}
 
+      <h2>Dịch PDF/paper (dự phòng Zen)</h2>
+      <Field
+        label="OpenCode Zen API key"
+        hint="Dùng khi Gemini ốm/quota — lấy key tại opencode.ai/auth. Để trống sẽ dùng key build sẵn (nếu có). Key chỉ lưu trên máy bạn."
+      >
+        <input
+          type="password"
+          value={settings.zenApiKey}
+          placeholder="sk-..."
+          onInput={(e) => update({ zenApiKey: (e.target as HTMLInputElement).value })}
+        />
+      </Field>
+
       <h2>Ngôn ngữ & hiển thị</h2>
       <div class="grid-2">
         <Field label="Ngôn ngữ đích" hint="Mã ngôn ngữ: vi, en, ja, ko, zh, fr, de, es…">

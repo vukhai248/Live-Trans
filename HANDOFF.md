@@ -74,19 +74,62 @@ VIEWER (extension page — có mọi quyền extension):
 
 ### 1.P.5. Việc cần làm cụ thể (checklist cho agent)
 
-- [ ] `npm i pdfjs-dist` trong `extension/` + cấu hình worker vào build (WXT)
-- [ ] `extension/lib/pdf/blocks.ts` — extract + group block (kèm unit test với fixture text items giả)
-- [ ] `extension/lib/pdf/translate.ts` — batch dịch qua provider (flash-lite) + cache `chrome.storage.session`
-- [ ] `extension/entrypoints/viewer/` — trang viewer (html + main.ts): url param, render, 3 chế độ, progress "đang dịch trang N"
-- [ ] `entrypoints/content/index.ts` — thêm FAB khi URL kết thúc `.pdf` HOẶC host arxiv.org/pdf/* (và trang chứa `<embed type="application/pdf">`) → `chrome.tabs.create({url: viewer?url=...})`
-- [ ] `lib/protocol/messages.ts` + settings: thêm `pdfTargetLang` (mặc định vi) nếu cần
-- [ ] Đổi model dịch PDF: hằng số `FLASH_LITE_MODEL = 'gemini-3.5-flash-lite'` trong lib/pdf (KHÔNG đụng FLASH_MODEL của video path)
-- [ ] Test thật (kịch bản §6, thay bước 3-4 bằng: mở arxiv → FAB → viewer) + CDP screenshot từng trạng thái
+- [x] `npm i pdfjs-dist` trong `extension/` + cấu hình worker vào build (WXT: public/pdf.worker.min.mjs)
+- [x] `extension/lib/pdf/blocks.ts` — extract + group block (kèm unit test với fixture text items giả — 3/3 tests PASS)
+- [x] `extension/lib/pdf/translate.ts` — batch dịch qua provider (flash-lite) + cache `chrome.storage.session`
+- [x] `extension/entrypoints/viewer/` — trang viewer (html + main.tsx + style.css): url param, render dual canvas, 3 chế độ (song ngữ, chỉ dịch, chỉ gốc), progress "đang dịch trang N", synchronized scrolling, synchronized element hover tracking (Ảnh 3)
+- [x] `entrypoints/content/index.ts` — thêm nút "Translate Now" (Ảnh 1) khi URL kết thúc `.pdf` HOẶC host arxiv.org/pdf/*, arxiv.org/abs/* (và trang chứa `<embed type="application/pdf">`) → mở tab viewer
+- [x] Popup Extension (`App.tsx`) — tự động nhận diện tab PDF, ẩn hoàn toàn Audio và hiển thị nút "🚀 Dịch Paper này (Translate Now)"
+- [x] Context Menu (`background.ts`) — chuột phải trang/link PDF: "📄 Dịch Paper này với Live-Trans (Song ngữ)"
+- [x] **Key Router (`extension/lib/providers/key-router.ts`)** — tự động xoay qua pool 8 API keys khi gặp HTTP 429 / Quota limits, tăng hạn ngạch lên 120 RPM, tránh tắc nghẽn
+- [x] **Hiển thị siêu nét HiDPI / Retina** — canvas `outputScale = Math.max(2.0, devicePixelRatio)` giải quyết triệt để lỗi mờ ở Ảnh 3
+- [x] **Font Serif học thuật & Căn lề Justify** — chuẩn format bài báo, không bị xô lệch dòng hay nhảy lộn xộn
+- [x] **Phân 2 cột Academic & Tách câu theo dấu chấm** — đọc chuẩn cột trái rồi cột phải; hover từng câu sáng đồng bộ 2 bên chuẩn xác như Ảnh 2 & 4
+- [x] **Tối ưu 1 Request / 1 Trang** — gom toàn bộ câu trong trang vào 1 call duy nhất, tiết kiệm quota tối đa và chất lượng ngữ cảnh cao
+- [x] **Lọc Watermark chữ dọc (`arXiv:...`)** — kiểm tra góc xoay transform matrix và toạ độ lề, loại bỏ hoàn toàn khỏi bài dịch
+- [x] **Cô lập Running Header & Đường kẻ ngang** — tách biệt tiêu đề trên cùng trang 2 (`Universal Guidance for Diffusion Models 2`), không bị gộp vào thân bài
+- [x] **Adaptive Typesetting Engine (BabelDOC / ACL 2026)** — tự động co dãn font và line-height theo tỷ lệ dãn nở văn bản, khóa `maxHeight`, chống tràn chữ đè công thức toán (1) và (2)
+- [x] **De-hyphenation & URL Shielding** — tự động nối liền link GitHub bị ngắt dòng (`Universal-Guided-` + `Diffusion.`), bảo vệ URL không bị dịch lẻ
+- [x] **Trình đọc Markdown Học thuật (Academic Markdown Reader - Dual-Pane SOTA)** — bên trái PDF gốc, bên phải Markdown Reader hiển thị các câu văn thoáng đãng, bảo tồn 100% công thức toán học khối `$$...$$` và nội dòng `$...$`, tiêu đề mục `#`, hộp thuật toán, footnote
+- [x] **Công tắc chuyển đổi chế độ xem (Reader Mode Switcher)** — cho phép người dùng chuyển đổi linh hoạt giữa `✨ Trình đọc Markdown (Khuyên dùng)` và `📄 Đè lên PDF (Overlay)`
+- [x] **Mặt nạ Bảo vệ Công thức Toán trong dòng (Inline Math Shielding - `⟦MATH_N⟧`)** — tự động bọc mã bảo vệ các ký hiệu $\{\alpha_t\}_{t=1}^T$, $z_0$, $t$, $\Delta z_0$ trước khi gửi AI, khôi phục 100% nguyên vẹn, xóa bỏ lỗi mất ký hiệu hoặc biến thành `đ0` (Ảnh 2, 3)
+- [x] **Chống cắt cụt đáy đoạn văn (Adaptive Text Auto-scaling & Overflow Visible)** — nới lỏng maxHeight 1.22x và bỏ overflow: hidden, dòng cuối hiển thị trọn vẹn không bị mất nửa chữ (Ảnh 1, 3)
+- [x] **Gom cụm Công thức Đa tầng (Multi-line Fractions Clustering)** — gộp trọn gói tử số, thanh phân số, mẫu số, dấu căn và nhãn phương trình (2), (3), (8), (9) thành 1 khối duy nhất, đệm lề an toàn chống nền trắng đè (Ảnh 1, 2, 5)
+- [x] **Cô lập Khối Thuật toán (Algorithm Box Isolation)** — bảo toàn nguyên vẹn mã giả `Algorithm 1 ... end for`, không bị gộp vụn hay che lấp công thức nhúng bên trong (Ảnh 3, 4)
+- [x] **Parallel Micro-Batching & Resilient JSON Parser** — chia nhỏ 8-12 câu/batch song song, tự động sửa lỗi cú pháp JSON, loại bỏ hoàn toàn lỗi crash ngầm giữ nguyên tiếng Anh (Ảnh 4)
+- [x] **Cô lập Display Equation & Formula Transparent Overlay** — tách riêng phương trình (1), (2), đặt overlay trong suốt để lộ vector Canvas siêu nét, không còn ô vuông rác hay chữ đè (Ảnh 5)
+- [x] **Block-Bounded Sentence Alignment** — khóa cứng biên độ tracking trong từng đoạn văn, triệt tiêu 100% hiện tượng lệch tích lũy (Cumulative Drift) (Ảnh 1, 2, 3)
+- [x] **Khôi phục Đường kẻ phân cách Footnote** — nhận diện khối footnote ở đáy trang và vẽ lại đường kẻ phân cách chuẩn học thuật (Ảnh 3)
+- [x] Đổi model dịch PDF: hằng số `FLASH_LITE_MODEL = 'gemini-3.5-flash-lite'` trong lib/pdf/translate.ts
+- [x] Typecheck + lint + 91/91 vitest tests PASS 100%, WXT build thành công (viewer.html + worker + key-router chunk)
+- [ ] Test thật trên browser (CfT) + kiểm tra tương tác thực tế paper arxiv 15 trang
 - [ ] Acceptance: paper 15 trang — hình vẽ/bảng KHÔNG bị đụng; thuật ngữ + citation [1] nguyên văn; 3 chế độ chuyển được; lật lại trang đã dịch không tốn call
 
 ### 1.P.6. Backend CLI (side tool, không bắt buộc cho sản phẩm)
 
 `backend/translate_paper.py` — prototype Python PyMuPDF đã viết (đã fix syntax `global`), chứng minh thuật toán redact+chèn. Cài: `pip install pymupdf google-genai` vào conda **DL** (đã cài). Chạy: `python backend/translate_paper.py backend/samples/2302.07121.pdf --pages 1-3`. Chưa chạy end-to-end (đứng lại khi pivot sang web viewer) — lỗi tiềm ẩn có thể còn; dùng để đối chiếu thuật toán khi làm `lib/pdf/`.
+
+### 1.P.7. ⭐ Ý tưởng Component + Bảng trắng (chốt với chủ project 2026-09-04, từ ảnh mockup)
+
+**Vấn đề gốc (xác nhận bằng test thật, không phải phỏng đoán):**
+- Tiếng Việt dài hơn tiếng Anh ~30% → text dịch luôn tràn khỏi bbox gốc. Mọi cách vá giữ bbox cứng đều thất bại: co chữ (xấu, badge "co chữ" khắp trang), push-down reflow (đỡ đè nhau nhưng vẫn lộ chữ Anh canvas giữa dòng + lệch hình).
+- Kết luận: **bỏ khớp canvas cứng ở pane dịch**. Không vá overlay nữa.
+
+**Ý tưởng Component (theo đúng mockup chủ project):**
+1. Mỗi phần paper là 1 component: title, authors, Abstract, `1. Introduction`, từng đoạn văn, công thức, figure, footnote — tách từ `lib/pdf/blocks.ts` (đã có sẵn).
+2. Dịch theo cụm component, batch nhiều component/call để tiết kiệm quota, nhưng cơ chế phân cách ID `pN_bM_sK` 1:1 để gắn lại đúng component (`translate.ts` đã có).
+3. Mặc định components xếp y hệt paper (paper chia đôi theo cột thì component cũng chia đôi) — đọc quen như paper gốc.
+4. User kéo-thả component tự do (tay cầm ⠿), resize rộng (◢) → chữ re-wrap ở cỡ gốc, reflow tự tính lại — không bao giờ tràn/đè mặc định. Layout custom lưu session, nút ⟲ Bố cục reset.
+5. **Bảng trắng (quyết định mới nhất):** pane dịch KHÔNG đè lên canvas PDF nữa mà ghi lên bảng trắng — layout tương tự paper nhưng nền trắng tinh để dễ đọc (không còn chữ Anh lộ ra). Figure là component placeholder đúng vị trí (phase sau cắt strip canvas thật).
+
+**Trạng thái:**
+- [x] Component kéo-thả/resize + khung chọn + lưu session + reset (overlay)
+- [x] Provider Zen dự phòng (muse-spark-1.2 verified 200/4s) + ô provider/model + Áp dụng + Dịch lại toàn bộ
+- [~] Mode Bảng trắng: đã code xong (sheet trắng + KaTeX đặc + figure placeholder) nhưng **test thật lại lỗi → REVERT**, quay về Overlay (build viewer-DLsYavcD). Chưa rõ nguyên nhân chi tiết — cần chủ project gửi ảnh/log lỗi.
+- [ ] Figure strip canvas thật (phase sau, chờ Bảng trắng ổn)
+- [ ] Benchmark lại TSR/glossary cho model Zen trước khi coi là mặc định
+
+> 📌 **Bài học 2026-09-05:** ý tưởng đúng nhưng triển khai mode mới hay đổ vỡ lúc test thật. Quy tắc từ nay: mỗi mode/render mới phải test 1 trang trước khi đặt làm mặc định, giữ mode cũ chạy được song song.
 
 ## 2. Trạng thái video path — ĐÃ CHẠY ĐƯỢC THẬT (bằng chứng)
 

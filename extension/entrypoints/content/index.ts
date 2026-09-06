@@ -20,6 +20,8 @@ export default defineContentScript({
       if (area === 'local' && SETTINGS_KEY in changes) void refreshSettings();
     });
 
+    initPdfTranslateButton();
+
     let lastTitle = '';
 
     const sendDetectedTitle = () => {
@@ -283,3 +285,100 @@ class OverlayHost {
     }
   }
 }
+
+/** Detects if the current page is a PDF document or Arxiv paper */
+export function detectPdfPage(): string | null {
+  const url = window.location.href;
+
+  // 1. Arxiv abstract or PDF page
+  const arxivAbsMatch = url.match(/arxiv\.org\/abs\/([0-9]+\.[0-9]+(v[0-9]+)?)/i);
+  if (arxivAbsMatch && arxivAbsMatch[1]) {
+    return `https://arxiv.org/pdf/${arxivAbsMatch[1]}.pdf`;
+  }
+  const arxivPdfMatch = url.match(/arxiv\.org\/pdf\/([0-9]+\.[0-9]+(v[0-9]+)?)/i);
+  if (arxivPdfMatch && arxivPdfMatch[1]) {
+    return url.endsWith('.pdf') ? url : `${url}.pdf`;
+  }
+
+  // 2. Direct .pdf URL
+  if (/\.pdf(\?|#|$)/i.test(url)) {
+    return url;
+  }
+
+  // 3. Embedded PDF element
+  const embed = document.querySelector('embed[type="application/pdf"]') as HTMLEmbedElement | null;
+  if (embed?.src) {
+    return embed.src;
+  }
+
+  return null;
+}
+
+function mountTranslateButton(pdfUrl: string) {
+  if (document.getElementById('lt-translate-now-btn')) return;
+
+  const btn = document.createElement('button');
+  btn.id = 'lt-translate-now-btn';
+  btn.innerHTML = `
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px"><path d="M5 8l6 6"/><path d="M4 14l6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="M22 22l-5-10-5 10"/><path d="M14 18h6"/></svg>
+    Translate Now
+  `;
+
+  btn.style.cssText = `
+    position: fixed;
+    top: 12px;
+    right: 75px;
+    z-index: 2147483646;
+    background: #2563eb;
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 9999px;
+    padding: 7px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.15);
+    display: flex;
+    align-items: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    transition: transform 0.15s, background-color 0.15s;
+  `;
+
+  btn.onmouseenter = () => {
+    btn.style.background = '#1d4ed8';
+    btn.style.transform = 'scale(1.03)';
+  };
+  btn.onmouseleave = () => {
+    btn.style.background = '#2563eb';
+    btn.style.transform = 'scale(1)';
+  };
+
+  btn.onclick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Mở qua background (tabs.create) — window.open trực tiếp từ page context
+    // bị adblock/popup-blocker chặn (ERR_BLOCKED_BY_CLIENT).
+    browser.runtime.sendMessage({ type: 'OPEN_VIEWER', pdfUrl }).catch(() => {
+      // Fallback khi background chưa sẵn sàng (hiếm): mở trực tiếp.
+      const viewerUrl = browser.runtime.getURL(`/viewer.html?url=${encodeURIComponent(pdfUrl)}`);
+      window.open(viewerUrl, '_blank');
+    });
+  };
+
+  document.body.appendChild(btn);
+}
+
+export function initPdfTranslateButton() {
+  const tryMount = () => {
+    const pdfUrl = detectPdfPage();
+    if (pdfUrl) {
+      mountTranslateButton(pdfUrl);
+    }
+  };
+
+  tryMount();
+  // Check again when DOM mutations occur (e.g. SPAs, embeds)
+  const obs = new MutationObserver(tryMount);
+  obs.observe(document.documentElement, { childList: true, subtree: true });
+}
+

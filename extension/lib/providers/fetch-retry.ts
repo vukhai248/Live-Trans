@@ -48,11 +48,28 @@ function parseRetryAfterMs(res: Response, body: string): number | null {
   return null;
 }
 
-export async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+export interface FetchRetryOptions {
+  /** Per-attempt timeout (ms). Hết timeout coi như lỗi transient và retry.
+   * Mặc định 0 = không timeout (giữ hành vi cũ cho video path). */
+  timeoutMs?: number;
+}
+
+export async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  options: FetchRetryOptions = {},
+): Promise<Response> {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const isLast = attempt === MAX_RETRIES;
+    const controller =
+      options.timeoutMs && options.timeoutMs > 0 ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), options.timeoutMs) : null;
     try {
-      const res = await fetch(url, init);
+      const res = await fetch(
+        url,
+        controller ? { ...init, signal: controller.signal } : init,
+      );
+      if (timer) clearTimeout(timer);
       if (res.ok || !isRetriableStatus(res.status) || isLast) return res;
 
       if (res.status === 429) {
@@ -63,6 +80,7 @@ export async function fetchWithRetry(url: string, init: RequestInit): Promise<Re
       }
       await delay(BACKOFF_MS[attempt] ?? 4000);
     } catch (err) {
+      if (timer) clearTimeout(timer);
       if (isLast) throw err;
       await delay(BACKOFF_MS[attempt] ?? 4000);
     }

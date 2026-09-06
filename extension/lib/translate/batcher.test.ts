@@ -21,6 +21,9 @@ const settings: Settings = {
   showTranslatedTitle: true,
   fontSize: 'medium',
   glossary: { version: 1, terms: [] },
+  pdfProvider: 'gemini',
+  pdfModel: 'gemini-3.5-flash-lite',
+  zenApiKey: '',
 };
 
 class FakeProvider implements Provider {
