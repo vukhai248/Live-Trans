@@ -1504,10 +1504,14 @@ export function ViewerApp() {
               onPointerDown={(e) => {
                 e.preventDefault();
                 isDraggingSplitter.current = true;
+                document.body.classList.add('lt-resizing');
                 const target = e.currentTarget as Element;
                 try {
                   target.setPointerCapture?.(e.pointerId);
                 } catch {}
+
+                let currentRatio = splitRatio;
+                let rafId = 0;
 
                 const onPointerMove = (ev: PointerEvent) => {
                   if (!isDraggingSplitter.current) return;
@@ -1516,16 +1520,37 @@ export function ViewerApp() {
                   const rect = workspace.getBoundingClientRect();
                   const rawRatio = (ev.clientX - rect.left) / rect.width;
                   const clamped = Math.max(0.2, Math.min(0.8, rawRatio));
-                  setSplitRatio(clamped);
+                  currentRatio = clamped;
+
+                  if (rafId) cancelAnimationFrame(rafId);
+                  rafId = requestAnimationFrame(() => {
+                    if (leftPaneRef.current) {
+                      leftPaneRef.current.style.width = `${clamped * 100}%`;
+                    }
+                    if (rightPaneRef.current) {
+                      rightPaneRef.current.style.width = `${(1 - clamped) * 100}%`;
+                    }
+                  });
                 };
 
                 const onPointerUp = (ev: PointerEvent) => {
                   isDraggingSplitter.current = false;
+                  document.body.classList.remove('lt-resizing');
+                  if (rafId) cancelAnimationFrame(rafId);
                   try {
                     target.releasePointerCapture?.(ev.pointerId);
                   } catch {}
                   window.removeEventListener('pointermove', onPointerMove);
                   window.removeEventListener('pointerup', onPointerUp);
+
+                  // Chỉ commit và tính lại scale một lần duy nhất khi nhả chuột
+                  setSplitRatio(currentRatio);
+                  if (zoomMode === 'fit') {
+                    const ls = calculatePaneFitScale(leftPaneRef.current);
+                    const rs = calculatePaneFitScale(rightPaneRef.current);
+                    setLeftFitScale(ls);
+                    setRightFitScale(rs);
+                  }
                 };
 
                 window.addEventListener('pointermove', onPointerMove);

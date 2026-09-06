@@ -347,6 +347,58 @@ body, html {
   background: #262a34;
 }
 
+/* DRAGGABLE SPLITTER BAR */
+.lt-splitter {
+  width: 10px;
+  background: #18181b;
+  cursor: ew-resize;
+  position: relative;
+  flex-shrink: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+
+.lt-splitter:hover,
+.lt-splitter:active {
+  background: #27272a;
+}
+
+.lt-splitter-bar {
+  width: 2px;
+  height: 48px;
+  border-radius: 2px;
+  background: #52525b;
+  transition: all 0.15s ease;
+}
+
+.lt-splitter:hover .lt-splitter-bar,
+.lt-splitter:active .lt-splitter-bar {
+  background: #38bdf8;
+  height: 64px;
+}
+
+/* KHI ĐANG KÉO SPLITTER: Tắt toàn bộ hover/select để đạt 120 FPS */
+body.lt-resizing {
+  user-select: none !important;
+  cursor: ew-resize !important;
+}
+body.lt-resizing * {
+  user-select: none !important;
+  pointer-events: none !important;
+}
+body.lt-resizing .lt-splitter {
+  pointer-events: auto !important;
+  background: #27272a !important;
+}
+body.lt-resizing .lt-splitter-bar {
+  background: #38bdf8 !important;
+  height: 100% !important;
+}
+
 /* SINGLE PAGE CONTAINER */
 /* B1: bỏ content-visibility — nó khiến browser bỏ qua layout trang ngoài
    viewport, làm scrollHeight đo sai → reflow offset=0 → đè chữ vĩnh viễn. */
