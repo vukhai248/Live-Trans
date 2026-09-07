@@ -3,6 +3,12 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import katex from 'katex';
 import { extractPageFigures, extractTextBlocks, type DetectedFigure } from '@/lib/pdf/blocks';
 import type { TextBlock } from '@/lib/pdf/types';
+import {
+  isTableRow,
+  parseMarkdownTable,
+  type MarkdownTable,
+  type TableAlign,
+} from '@/lib/pdf/md-table';
 import { PdfSnippet } from './PdfSnippet';
 
 export interface VisionPageRendererProps {
@@ -408,6 +414,9 @@ function VisionMarkdownContent({
             </ul>
           );
         }
+        if (b.type === 'table' && b.table) {
+          return <VisionTable key={idx} table={b.table} />;
+        }
         return (
           <p key={idx} class="lt-vision-paragraph">
             <VisionInlineText text={b.content} />
@@ -499,6 +508,42 @@ function VisionDisplayEquation({ latex }: { latex: string }) {
   }, [latex]);
 
   return <div ref={ref} class="lt-vision-display-eq" />;
+}
+
+function tableCellAlign(a: TableAlign | undefined): 'left' | 'center' | 'right' {
+  if (a === 'center') return 'center';
+  if (a === 'right') return 'right';
+  return 'left';
+}
+
+/** Bảng markdown thật (thay vì text thô | ... |). Ô dùng VisionInlineText nên $...$ vẫn render. */
+function VisionTable({ table }: { table: MarkdownTable }) {
+  return (
+    <div class="lt-vision-table-wrap">
+      <table class="lt-vision-table">
+        <thead>
+          <tr>
+            {table.headers.map((h, i) => (
+              <th key={i} style={{ textAlign: tableCellAlign(table.aligns[i]) }}>
+                <VisionInlineText text={h} />
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {table.rows.map((row, ri) => (
+            <tr key={ri}>
+              {row.map((cell, ci) => (
+                <td key={ci} style={{ textAlign: tableCellAlign(table.aligns[ci]) }}>
+                  <VisionInlineText text={cell} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 export interface ParsedAlgorithmLine {
@@ -660,7 +705,7 @@ function renderMarkdownInlineWithKatex(text: string): string {
 }
 
 interface ParsedBlock {
-  type: 'heading' | 'equation' | 'figure' | 'quote' | 'list' | 'paragraph' | 'algorithm';
+  type: 'heading' | 'equation' | 'figure' | 'quote' | 'list' | 'paragraph' | 'algorithm' | 'table';
   level?: number;
   content: string;
   items?: string[];
@@ -670,6 +715,7 @@ interface ParsedBlock {
   algTitle?: string;
   algParams?: string[];
   algLines?: ParsedAlgorithmLine[];
+  table?: MarkdownTable;
 }
 
 function parseMarkdownIntoBlocks(text: string): ParsedBlock[] {
@@ -695,6 +741,23 @@ function parseMarkdownIntoBlocks(text: string): ParsedBlock[] {
   let algParams: string[] = [];
   let algLines: ParsedAlgorithmLine[] = [];
   let loopDepth = 0;
+
+  // Gom các dòng bảng markdown liên tiếp (| ... |) thành 1 block table.
+  let tableBuffer: string[] = [];
+
+  const flushTableBuffer = () => {
+    if (tableBuffer.length === 0) return;
+    const parsed = parseMarkdownTable(tableBuffer);
+    if (parsed) {
+      blocks.push({ type: 'table', content: '', table: parsed });
+    } else {
+      // Không phải bảng hợp lệ (thiếu dòng ---) → giữ hành vi cũ: paragraph.
+      for (const l of tableBuffer) {
+        if (l.trim().length > 0) blocks.push({ type: 'paragraph', content: l.trim() });
+      }
+    }
+    tableBuffer = [];
+  };
 
   const flushQuote = () => {
     if (quoteBuffer.length > 0) {
@@ -779,6 +842,18 @@ function parseMarkdownIntoBlocks(text: string): ParsedBlock[] {
         eqBuffer.push(line);
       }
       continue;
+    }
+
+    // 1b. Dòng bảng markdown (| ... |) — gom khối, flush khi gặp dòng khác.
+    if (isTableRow(line)) {
+      flushQuote();
+      flushFigure();
+      flushList();
+      flushAlgorithm();
+      tableBuffer.push(rawLine);
+      continue;
+    } else if (tableBuffer.length > 0) {
+      flushTableBuffer();
     }
 
     // 2. Check for Figure Block: > **Figure 1**: ... or **[Hình 1]**: ... or Figure 1: ...
@@ -931,6 +1006,7 @@ function parseMarkdownIntoBlocks(text: string): ParsedBlock[] {
   flushFigure();
   flushList();
   flushAlgorithm();
+  flushTableBuffer();
   if (inEq && eqBuffer.length > 0) {
     blocks.push({ type: 'equation', content: eqBuffer.join('\n').trim() });
   }

@@ -1650,6 +1650,48 @@ body.lt-resizing .lt-splitter-bar {
   color: #0369a1;
 }
 
+/* Bảng markdown (paper: Table 1-4 DomainBed/VLCS) */
+.lt-vision-table-wrap {
+  margin: 16px 0;
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.lt-vision-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #1e293b;
+}
+
+.lt-vision-table th,
+.lt-vision-table td {
+  border: 1px solid #e2e8f0;
+  padding: 6px 10px;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.lt-vision-table thead th {
+  background: #f1f5f9;
+  font-weight: 700;
+  color: #0f172a;
+  white-space: normal;
+}
+
+.lt-vision-table tbody tr:nth-child(even) {
+  background: #f8fafc;
+}
+
+.lt-vision-table td:first-child,
+.lt-vision-table th:first-child {
+  white-space: normal;
+  font-weight: 600;
+}
+
 /* ==========================================================================
    ACADEMIC ALGORITHM BOX (CVPR / NeurIPS / ACM Style)
    ========================================================================== */
