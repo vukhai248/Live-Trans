@@ -182,6 +182,7 @@ export interface WhiteboardPageRendererProps {
   pdfDoc: PDFDocumentProxy;
   pageNumber: number;
   scale: number;
+  heightScale?: number;
   blocks: TranslatedBlock[];
   hoveredSentenceId: string | null;
   onHoverSentence: (id: string | null) => void;
@@ -196,6 +197,7 @@ export function WhiteboardPageRenderer({
   pdfDoc,
   pageNumber,
   scale = 1.0,
+  heightScale,
   blocks,
   hoveredSentenceId,
   onHoverSentence,
@@ -208,7 +210,7 @@ export function WhiteboardPageRenderer({
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState<{ width: number; height: number }>({
     width: 612 * scale,
-    height: 792 * scale,
+    height: 792 * (heightScale ?? scale),
   });
 
   const visionEquations = useMemo(() => {
@@ -225,8 +227,10 @@ export function WhiteboardPageRenderer({
       try {
         const page = await pdfDoc.getPage(pageNumber);
         if (!active) return;
-        const vp = page.getViewport({ scale });
-        setDimensions({ width: vp.width, height: vp.height });
+        const hScale = heightScale ?? scale;
+        const vpH = page.getViewport({ scale: hScale });
+        const vpW = page.getViewport({ scale });
+        setDimensions({ width: vpW.width, height: vpH.height });
       } catch (e) {
         console.warn('Failed to load page viewport:', e);
       }
@@ -234,7 +238,7 @@ export function WhiteboardPageRenderer({
     return () => {
       active = false;
     };
-  }, [pdfDoc, pageNumber, scale]);
+  }, [pdfDoc, pageNumber, scale, heightScale]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -253,6 +257,8 @@ export function WhiteboardPageRenderer({
     observer.observe(el);
     return () => observer.disconnect();
   }, [pageNumber, onVisible]);
+
+
 
   // Group blocks by structural components
   const {

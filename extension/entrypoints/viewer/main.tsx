@@ -671,6 +671,202 @@ export function ViewerApp() {
     });
   };
 
+  // Intelligent Reading Column Coordinator & Ceiling-Lock:
+  // Điều phối cuộn thông minh cho khung đọc bản dịch:
+  // 1. Phân biệt chính xác "vùng đen": Chỉ khoảng trống 2 bên sườn (lề trái/phải) mới lướt tự do ngoài khung.
+  // 2. Toàn bộ dải cột đọc (bao gồm thân trang, header và khoảng cách 24px giữa các trang):
+  //    - Nếu trang hiện tại ở trần và nội dung chưa hết: khóa khung cha, cuộn nội dung trong trang.
+  //    - Khi nội dung đã hết đáy: khung cha cuộn sang trang kế tiếp.
+  //    - Chống vọt lố (Ceiling Clamp): Khung cha chỉ cuộn tối đa đến đúng trần trang tiếp theo rồi dừng chuẩn xác,
+  //      phần lực cuộn dư được chuyển tiếp ngay vào nội dung trang mới.
+  useEffect(() => {
+    const right = rightPaneRef.current;
+    if (!right) return;
+
+    const onRightPaneWheel = (e: WheelEvent) => {
+      // Bỏ qua nếu không có chuyển động cuộn trục Y
+      if (!e.deltaY) return;
+
+      const pages = Array.from(
+        right.querySelectorAll<HTMLElement>('.lt-vision-page, .lt-whiteboard-page')
+      );
+      if (pages.length === 0) return;
+
+      const firstPage = pages[0];
+      if (!firstPage) return;
+
+      const firstPageRect = firstPage.getBoundingClientRect();
+      // "Vùng đen" thực sự: Chỉ là khoảng trống nằm ở 2 bên sườn trái/phải của trang giấy
+      const isInSideMargin = e.clientX < firstPageRect.left || e.clientX > firstPageRect.right;
+      if (isInSideMargin) {
+        // Con trỏ ở vùng lề đen 2 bên: cho phép cuộn tự do cả khung ngoài, skip qua scroll in page
+        return;
+      }
+
+      // Con trỏ nằm trong Cột đọc tài liệu (Reading Column)
+      // Tìm trang đang ở vị trí trần hoặc đang hiển thị tại đỉnh khung
+      let currIdx = 0;
+      for (let i = 0; i < pages.length; i++) {
+        const p = pages[i];
+        if (!p) continue;
+        const ceiling = p.offsetTop - 24;
+        if (right.scrollTop >= ceiling - 2) {
+          currIdx = i;
+        } else {
+          break;
+        }
+      }
+
+      const pCurr = pages[currIdx];
+      if (!pCurr) return;
+      const targetCeiling = pCurr.offsetTop - 24;
+      const bodyCurr =
+        pCurr.querySelector<HTMLElement>('.lt-vision-body') ??
+        (pCurr.classList.contains('lt-whiteboard-page') ? pCurr : null);
+
+      if (e.deltaY > 0) {
+        // === CUỘN XUỐNG ===
+        // Trường hợp 1: Khung cha chưa tới trần của trang hiện tại (chưa chạm trần)
+        if (right.scrollTop < targetCeiling - 2) {
+          const dist = targetCeiling - right.scrollTop;
+          if (e.deltaY <= dist) {
+            right.scrollTop += e.deltaY;
+          } else {
+            right.scrollTop = targetCeiling;
+            if (bodyCurr) {
+              bodyCurr.scrollTop += (e.deltaY - dist);
+            }
+          }
+          e.preventDefault();
+          return;
+        }
+
+        // Trường hợp 2: Trang hiện tại đang ở trần (right.scrollTop ≈ targetCeiling)
+        const maxScroll = bodyCurr ? Math.max(0, bodyCurr.scrollHeight - bodyCurr.clientHeight) : 0;
+        const remainingDown = bodyCurr ? maxScroll - bodyCurr.scrollTop : 0;
+
+        if (remainingDown > 3 && bodyCurr) {
+          // Trang hiện tại chưa cuộn hết nội dung: Khóa chặt khung cha, chỉ cuộn nội dung trong trang
+          right.scrollTop = targetCeiling; // Khóa cứng trần
+          const prevScroll = bodyCurr.scrollTop;
+          bodyCurr.scrollTop += e.deltaY;
+          const actualScrolled = bodyCurr.scrollTop - prevScroll;
+
+          // Nếu phần tử không cuộn được đủ deltaY (đã chạm đáy vật lý do subpixel clamp)
+          if (actualScrolled < e.deltaY) {
+            const unusedDelta = e.deltaY - Math.max(0, actualScrolled);
+            if (currIdx < pages.length - 1) {
+              const nextP = pages[currIdx + 1];
+              if (nextP) {
+                const nextCeiling = nextP.offsetTop - 24;
+                right.scrollTop = Math.min(nextCeiling, right.scrollTop + unusedDelta);
+              }
+            }
+          }
+          e.preventDefault();
+          return;
+        }
+
+        // Trường hợp 3: Trang hiện tại đã hết nội dung (remainingDown <= 3) -> Cuộn sang trang tiếp theo
+        if (currIdx < pages.length - 1) {
+          const pNext = pages[currIdx + 1];
+          if (pNext) {
+            const nextCeiling = pNext.offsetTop - 24;
+            const distToNext = nextCeiling - right.scrollTop;
+
+            if (distToNext > 0) {
+              if (e.deltaY <= distToNext) {
+                right.scrollTop += e.deltaY;
+              } else {
+                // HÃM PHANH CHỐNG VỌT LỐ: Khóa chuẩn xác ở trần trang kế tiếp!
+                right.scrollTop = nextCeiling;
+                const nextBody =
+                  pNext.querySelector<HTMLElement>('.lt-vision-body') ??
+                  (pNext.classList.contains('lt-whiteboard-page') ? pNext : null);
+                if (nextBody) {
+                  nextBody.scrollTop += (e.deltaY - distToNext);
+                }
+              }
+              e.preventDefault();
+              return;
+            }
+          }
+        }
+      } else if (e.deltaY < 0) {
+        // === CUỘN LÊN ===
+        const absDelta = Math.abs(e.deltaY);
+
+        // Trường hợp 1: Khung cha đang ở lưng chừng giữa 2 trang (right.scrollTop > targetCeiling + 2)
+        if (right.scrollTop > targetCeiling + 2) {
+          const dist = right.scrollTop - targetCeiling;
+          if (absDelta <= dist) {
+            right.scrollTop -= absDelta;
+          } else {
+            right.scrollTop = targetCeiling;
+            const excess = absDelta - dist;
+            if (bodyCurr) {
+              bodyCurr.scrollTop = Math.max(0, bodyCurr.scrollTop - excess);
+            }
+          }
+          e.preventDefault();
+          return;
+        }
+
+        // Trường hợp 2: Trang hiện tại đang ở trần và nội dung bên trong chưa cuộn về đỉnh
+        const remainingUp = bodyCurr ? bodyCurr.scrollTop : 0;
+        if (remainingUp > 3 && bodyCurr) {
+          right.scrollTop = targetCeiling; // Khóa cứng trần
+          const prevScroll = bodyCurr.scrollTop;
+          bodyCurr.scrollTop -= absDelta;
+          const actualScrolled = prevScroll - bodyCurr.scrollTop;
+
+          if (actualScrolled < absDelta) {
+            const unusedDelta = absDelta - Math.max(0, actualScrolled);
+            if (currIdx > 0) {
+              const prevP = pages[currIdx - 1];
+              if (prevP) {
+                const prevCeiling = prevP.offsetTop - 24;
+                right.scrollTop = Math.max(prevCeiling, right.scrollTop - unusedDelta);
+              }
+            }
+          }
+          e.preventDefault();
+          return;
+        }
+
+        // Trường hợp 3: Trang hiện tại đang ở đỉnh (remainingUp <= 3) -> Cuộn lùi về trang trước
+        if (currIdx > 0) {
+          const pPrev = pages[currIdx - 1];
+          if (pPrev) {
+            const prevCeiling = pPrev.offsetTop - 24;
+            const distToPrev = right.scrollTop - prevCeiling;
+
+            if (distToPrev > 0) {
+              if (absDelta <= distToPrev) {
+                right.scrollTop -= absDelta;
+              } else {
+                // HÃM PHANH: Dừng chuẩn xác ở trần trang trước
+                right.scrollTop = prevCeiling;
+                const prevBody =
+                  pPrev.querySelector<HTMLElement>('.lt-vision-body') ??
+                  (pPrev.classList.contains('lt-whiteboard-page') ? pPrev : null);
+                if (prevBody) {
+                  const prevMax = Math.max(0, prevBody.scrollHeight - prevBody.clientHeight);
+                  prevBody.scrollTop = Math.max(0, prevMax - (absDelta - distToPrev));
+                }
+              }
+              e.preventDefault();
+              return;
+            }
+          }
+        }
+      }
+    };
+
+    right.addEventListener('wheel', onRightPaneWheel, { passive: false });
+    return () => right.removeEventListener('wheel', onRightPaneWheel);
+  }, [viewMode, numPages]);
+
   // P3-quota: hàng đợi dịch theo trang, tối đa 2 trang đồng thời — tránh burst
   // chạm quota/overload khi user cuộn nhanh (mỗi trang đã có micro-batch song song).
   const pageQueueRef = useRef<{ active: number; waiting: Array<() => void> }>({
@@ -1462,6 +1658,34 @@ export function ViewerApp() {
         </div>
       )}
 
+      {/* WARNING BANNER NẾU CHƯA CÓ API KEY */}
+      {!hasActiveKey && (
+        <div class="lt-api-key-warning-banner">
+          <div class="lt-warning-left">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <div>
+              <div class="lt-warning-title">
+                Cảnh báo: Chưa cấu hình {settings.pdfProvider === 'zen' ? 'OpenCode Zen' : 'Google Gemini'} API Key
+              </div>
+              <div class="lt-warning-sub">
+                Hệ thống tạm dừng tiến trình dịch ngầm. Vui lòng thêm API Key để hệ thống dịch tài liệu sang tiếng Việt kèm công thức KaTeX.
+              </div>
+            </div>
+          </div>
+          <button class="lt-btn lt-btn-warning" onClick={() => setIsSettingsOpen(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+            <span>Cấu hình API Key</span>
+          </button>
+        </div>
+      )}
+
       {/* MAIN CONTENT AREA */}
       <div class="lt-main">
         {/* CLICK-TO-EXPAND SIDEBAR DRAWER (Chỉ mở khi bấm nút Trang, không chiếm diện tích) */}
@@ -1653,34 +1877,6 @@ export function ViewerApp() {
                 flex: 'none',
               }}
             >
-              {/* WARNING BANNER NẾU CHƯA CÓ API KEY */}
-              {!hasActiveKey && (
-                <div class="lt-api-key-warning-banner">
-                  <div class="lt-warning-left">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
-                      <line x1="12" y1="9" x2="12" y2="13"/>
-                      <line x1="12" y1="17" x2="12.01" y2="17"/>
-                    </svg>
-                    <div>
-                      <div class="lt-warning-title">
-                        Cảnh báo: Chưa cấu hình {settings.pdfProvider === 'zen' ? 'OpenCode Zen' : 'Google Gemini'} API Key
-                      </div>
-                      <div class="lt-warning-sub">
-                        Hệ thống tạm dừng tiến trình dịch ngầm. Vui lòng thêm API Key để hệ thống dịch tài liệu sang tiếng Việt kèm công thức KaTeX.
-                      </div>
-                    </div>
-                  </div>
-                  <button class="lt-btn lt-btn-warning" onClick={() => setIsSettingsOpen(true)}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <circle cx="12" cy="12" r="3"/>
-                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                    </svg>
-                    <span>Cấu hình API Key</span>
-                  </button>
-                </div>
-              )}
-
               {Array.from({ length: numPages }).map((_, idx) => {
                 const pno = idx + 1;
                 if (readerMode === 'whiteboard') {
@@ -1690,6 +1886,7 @@ export function ViewerApp() {
                       pdfDoc={pdfDoc}
                       pageNumber={pno}
                       scale={effectiveRightScale}
+                      heightScale={viewMode === 'bilingual' ? effectiveLeftScale : effectiveRightScale}
                       blocks={pageTranslations[pno] || []}
                       hoveredSentenceId={hoveredSentenceId}
                       onHoverSentence={setHoveredSentenceId}
@@ -1708,6 +1905,7 @@ export function ViewerApp() {
                     pdfDoc={pdfDoc}
                     pageNumber={pno}
                     scale={effectiveRightScale}
+                    heightScale={viewMode === 'bilingual' ? effectiveLeftScale : effectiveRightScale}
                     markdownText={pageVisionTranslations[pno] || ''}
                     status={pageVisionStatus[pno] || 'loading'}
                     errorMsg={pageVisionErrors[pno] || ''}

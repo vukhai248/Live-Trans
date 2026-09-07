@@ -15,6 +15,7 @@ export interface VisionPageRendererProps {
   pdfDoc?: PDFDocumentProxy;
   pageNumber: number;
   scale?: number;
+  heightScale?: number;
   markdownText?: string;
   status?: 'loading' | 'done' | 'error' | 'queued';
   isPriority?: boolean;
@@ -29,6 +30,7 @@ export function VisionPageRenderer({
   pdfDoc,
   pageNumber,
   scale = 1.0,
+  heightScale,
   markdownText = '',
   status = 'loading',
   isPriority = false,
@@ -42,69 +44,12 @@ export function VisionPageRenderer({
   const bodyRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState<boolean>(false);
 
-  // Smooth Chained Wheel Scrolling: cuộn hết trong trang sẽ tự động cuộn sang trang kế tiếp mà không bị khựng
-  useEffect(() => {
-    const el = bodyRef.current;
-    if (!el) return;
 
-    const onWheel = (e: WheelEvent) => {
-      const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
-      if (maxScroll <= 0) {
-        // Nội dung ngắn hơn khung trang: truyền thẳng sự kiện cuộn ra container cha
-        const pane = el.closest<HTMLElement>('.lt-pane-right');
-        if (pane) {
-          pane.scrollTop += e.deltaY;
-          e.preventDefault();
-        }
-        return;
-      }
-
-      if (e.deltaY > 0) {
-        const remainingDown = maxScroll - el.scrollTop;
-        if (remainingDown <= 1) {
-          // Đã chạm đáy trang: cuộn tiếp container cha sang trang kế
-          const pane = el.closest<HTMLElement>('.lt-pane-right');
-          if (pane) {
-            pane.scrollTop += e.deltaY;
-            e.preventDefault();
-          }
-        } else if (e.deltaY > remainingDown) {
-          // Cuộn hết phần còn lại của trang, phần dư chuyển tiếp sang container cha
-          el.scrollTop = maxScroll;
-          const pane = el.closest<HTMLElement>('.lt-pane-right');
-          if (pane) {
-            pane.scrollTop += (e.deltaY - remainingDown);
-            e.preventDefault();
-          }
-        }
-      } else if (e.deltaY < 0) {
-        const remainingUp = el.scrollTop;
-        if (remainingUp <= 1) {
-          // Đã chạm đỉnh trang: cuộn ngược container cha lên trang trước
-          const pane = el.closest<HTMLElement>('.lt-pane-right');
-          if (pane) {
-            pane.scrollTop += e.deltaY;
-            e.preventDefault();
-          }
-        } else if (Math.abs(e.deltaY) > remainingUp) {
-          el.scrollTop = 0;
-          const pane = el.closest<HTMLElement>('.lt-pane-right');
-          if (pane) {
-            pane.scrollTop += (e.deltaY + remainingUp);
-            e.preventDefault();
-          }
-        }
-      }
-    };
-
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, []);
 
   // Exact page dimensions to guarantee 1:1 vertical sync with left PDF page
   const [dimensions, setDimensions] = useState<{ width: number; height: number }>({
     width: 612 * scale,
-    height: 792 * scale,
+    height: 792 * (heightScale ?? scale),
   });
   const [detectedFigures, setDetectedFigures] = useState<DetectedFigure[]>([]);
 
@@ -116,8 +61,10 @@ export function VisionPageRenderer({
       try {
         const page = await pdfDoc.getPage(pageNumber);
         if (!active) return;
-        const vp = page.getViewport({ scale });
-        setDimensions({ width: vp.width, height: vp.height });
+        const hScale = heightScale ?? scale;
+        const vpH = page.getViewport({ scale: hScale });
+        const vpW = page.getViewport({ scale });
+        setDimensions({ width: vpW.width, height: vpH.height });
 
         // CỐ ĐỊNH: Bóc tách text blocks và bounding boxes hình ảnh LUÔN dùng scale = 1.0 chuẩn (PDF points)
         // để tọa độ không bị trôi lệch hay phình to khi người dùng zoom (115%, 150%, Fit Width,...)
@@ -141,7 +88,7 @@ export function VisionPageRenderer({
     return () => {
       active = false;
     };
-  }, [pdfDoc, pageNumber, scale, blocks]);
+  }, [pdfDoc, pageNumber, scale, heightScale, blocks]);
 
   const figuresMap = useMemo(() => {
     const byNum = new Map<number, [number, number, number, number]>();
@@ -189,6 +136,7 @@ export function VisionPageRenderer({
       data-page-number={pageNumber}
       style={{
         width: `${Math.round(dimensions.width)}px`,
+        height: `${Math.round(dimensions.height)}px`,
         minHeight: `${Math.round(dimensions.height)}px`,
         maxHeight: `${Math.round(dimensions.height)}px`,
       }}

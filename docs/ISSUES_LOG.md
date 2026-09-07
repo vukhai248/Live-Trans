@@ -38,6 +38,8 @@ Tài liệu này tổng hợp toàn bộ các lỗi phát sinh trong quá trình
 | **ISSUE-028** | Dead Code / Markdown Elements & Over-exports | Hàm `blocksToMarkdownElements` (81 dòng) và `interface MarkdownElement` trong `markdown.ts` cùng `isDisplayEquation` trong `blocks.ts` là mã chết không còn sử dụng; 16 hàm nội bộ bị `export` thừa thãi ngoài phạm vi. | Hệ thống Reader v0.1 cũ đã được thay thế hoàn toàn bằng Vision AI Markdown và Whiteboard; các hàm nội bộ chỉ được gọi bên trong module của chúng. | (1) Xóa `blocksToMarkdownElements`, `MarkdownElement` trong `markdown.ts` và dọn test case tương ứng trong `markdown.test.ts`; (2) Xóa `isDisplayEquation` trong `blocks.ts`; (3) Gỡ bỏ từ khóa `export` cho 16 hàm nội bộ trong `blocks.ts`, `mock.ts`, `validator.ts`, `translate.ts`, `vision-translate.ts`, `content/index.ts`. Kiểm thử đạt 141/141 tests pass 100%. (4) [Hoàn tất] Xóa alias `isMathFormula` (đổi 11 expects sang `isMathFragment`), `_source` thay `void source`, xóa `maskMap: {}` request-level; giữ `queue getters`/`displayDurationMs`/vision-cache fns vì đã có test bao phủ. Check xanh, giữ nguyên 141/141 tests. | ✅ Đã khắc phục (A13) |
 | **ISSUE-029** | Repo Hygiene / Redundant Assets | Zip build cũ (`dist/`, `.output/*0.1.0/1.0.0*.zip`), ảnh debug `backend/output/*.png`, prototype `backend/` + `demo/` + 5 script probe cũ nằm lẫn trong cây làm việc, cache `.tools/profile/` ~292MB. | Không có quy trình dọn dẹp sau release; mọi artifact nằm lẫn với mã nguồn. | Xóa zip/png cũ; `git mv demo/→archive/demo/`, `backend/translate_paper.py+fonts/→archive/python-prototype/`, 5 script cũ→`archive/old-scripts/` (giữ history); purge `.tools/profile/`. Check xanh 141/141. | ✅ Đã khắc phục (A14) |
 | **ISSUE-030** | Tooling / Root Config | Không có `package.json` ở root → `npm test/build/check` ở root lỗi ENOENT, CI và agent phải `cd extension`. | Mọi config npm nằm cô lập trong `extension/`. | Thêm `package.json` proxy root forward 7 scripts vào `extension/` (không dependencies). Verify `npm test` từ root: 21 files, 141/141 pass. | ✅ Đã khắc phục (A15) |
+| **ISSUE-031** | UI / Alignment | Cửa sổ bản dịch bị lệch điểm bắt đầu và kết thúc so với trang gốc (lệch ngắt trang tích lũy). | Đo chiều cao bằng effectiveRightScale thay vì effectiveLeftScale; margin-bottom 32px cộng dồn với gap 24px; warning banner đặt trong khung phải. | Thêm prop heightScale={effectiveLeftScale} đồng bộ chiều cao 1:1; chuẩn hóa margin: 0 auto; đưa warning banner lên trên workspace. | ✅ Đã khắc phục & Kiểm chứng |
+| **ISSUE-032** | UX / Scrolling | (1) Hover vào trang mới khi chưa chạm trần đã bị cuộn nội dung con làm mất tiêu đề; (2) Lướt nhanh qua khoảng đen 24px bị vọt lố qua trang kế tiếp; (3) Cuộn hết nội dung trong trang bị đứng cứng (freeze) do subpixel DPI scaling. | (1) Thiếu khóa trần (ceiling-lock); (2) Bắt nhầm khoảng trống giữa 2 trang là vùng lề đen ngoài lề; (3) Trên HiDPI scaling, `remainingDown` dừng ở mức lẻ (> 1px) khiến điều kiện khóa trần liên tục kích hoạt, chặn cuộn khung cha. | (1) Bộ điều phối Reading Column Coordinator chỉ kích hoạt scroll in page khi trần trang chạm đỉnh; (2) Giới hạn vùng lề đen thực sự ở 2 bên sườn trang (clientX); (3) Nâng ngưỡng nhận diện đáy an toàn (3px) và chuyển tiếp lực cuộn dư (unusedDelta) ra khung cha khi chạm đáy. | ✅ Đã khắc phục & Kiểm chứng |
 
 ---
 
@@ -168,3 +170,40 @@ flowchart TD
   2. Đồng bộ version trong `extension/package-lock.json` lên `1.0.1`.
   3. Chạy kiểm chứng toàn bộ `npm run check` (`wxt prepare` + `tsc` + `eslint` + `vitest`) đảm bảo 100% xanh trước khi commit và push lại lên Git.
 
+---
+
+## 7. Phân tích Chi tiết ISSUE-031: Lệch Chiều Cao & Điểm Bắt Đầu / Kết Thúc Giữa Trang Gốc và Trang Dịch
+
+- **Hiện tượng**:
+  - Cửa sổ hiển thị bản dịch (khung phải) bị lệch ranh giới bắt đầu (đỉnh trang) và kết thúc (đáy trang) so với 1 trang của bài báo gốc (khung trái). Càng cuộn xuống các trang phía dưới độ lệch càng tích lũy lớn.
+- **Nguyên nhân gốc rễ**:
+  1. **Đo sai chiều cao trang dịch**: `VisionPageRenderer` và `WhiteboardPageRenderer` tính chiều cao theo `effectiveRightScale` thay vì `effectiveLeftScale`.
+  2. **Cộng dồn Margin đáy ở khung phải**: Flexbox container có `gap: 24px`, nhưng trang dịch lại có `margin: 0 auto 32px auto` (thừa 32px mỗi trang).
+  3. **Banner cảnh báo đẩy lệch Trang 1**: Thẻ warning banner nằm trong `.lt-pane-right` đẩy tụt toàn bộ trang bên phải xuống 110px.
+- **Giải pháp xử lý**:
+  1. Bổ sung prop `heightScale={effectiveLeftScale}` để đồng bộ chiều cao trang 1:1 với khung trái.
+  2. Chuẩn hóa `margin: 0 auto` cho `.lt-vision-page` và `.lt-whiteboard-page` trong `style.css`.
+  3. Đưa warning banner ra ngoài `.lt-pane-right`, đặt phía trên `<main class="lt-workspace">`.
+
+---
+
+## 8. Phân tích Chi tiết ISSUE-032: Điều Phối Cuộn Trang Toàn Diện (Reading Column Coordinator)
+
+- **Hiện tượng**:
+  1. Khi cuộn tới trang mới, nếu con trỏ chuột nằm trong trang khi trang chưa chạm trần, phần cuộn nội bộ trong trang (`scroll in page`) đã bị kích hoạt sớm, làm mất phần tiêu đề/thuật toán đầu trang trước khi người dùng kịp nhìn tổng thể.
+  2. Khi lướt nhanh qua khoảng đen 24px giữa 2 trang (hoặc header trang), hệ thống bắt nhầm là con trỏ chuột ở vùng đen ngoài lề, khiến khung cha nhảy vọt lố qua trang kế tiếp mà không dừng lại ở trần.
+  3. Khi cuộn tới đáy nội dung của trang, người dùng bị kẹt cứng (freeze), không thể cuộn tiếp để chuyển sang trang kế tiếp.
+- **Nguyên nhân gốc rễ**:
+  1. Cơ chế bắt sự kiện cuộn trước đây nằm rải rác trên từng component trang (`onWheel` cục bộ), không có khả năng nhận biết tọa độ trần của trang đối với khung cha.
+  2. Bắt vùng lề đen dựa vào target DOM element thay vì tọa độ ngang `clientX`. Khoảng đệm `gap: 24px` giữa 2 trang và header trang thuộc về vùng đọc nhưng không nằm trong `.lt-vision-body`, dẫn đến bị phán đoán nhầm là lề ngoài.
+  3. Trên Windows với màn hình HiDPI scaling (125%, 150%), `scrollTop` là số thực thập phân (ví dụ `804.7999877929688px`). Do đó, `remainingDown = maxScroll - body.scrollTop` dừng ở mức xấp xỉ ~1.5px, lớn hơn ngưỡng `1px` trước đó. Điều này khiến điều kiện khóa trần `remainingDown > 1` liên tục kích hoạt và gọi `e.preventDefault()`, khóa cứng `right.scrollTop` trong khi nội dung con đã chạm đáy vật lý không thể cuộn thêm được nữa.
+- **Giải pháp xử lý**:
+  1. **Tập trung hóa Bộ Điều Phối (Reading Column Coordinator)**: Đặt listener duy nhất tại `rightPaneRef.current` (`main.tsx`), loại bỏ hoàn toàn các `onWheel` cục bộ rời rạc trên từng trang.
+  2. **Phân định ranh giới Cột Đọc Chuẩn Xác**:
+     - *Vùng lề đen thực sự*: `clientX < firstPageRect.left || clientX > firstPageRect.right`. Cho phép cuộn tự do cả khung ngoài.
+     - *Cột đọc tài liệu*: `firstPageRect.left <= clientX <= firstPageRect.right` (bao gồm thân trang, header và khoảng đệm 24px giữa các trang).
+  3. **Khóa Trần Chuẩn Xác (Ceiling-Lock)**: Khi trang chưa chạm trần (`right.scrollTop < targetCeiling - 2`), chỉ cuộn khung cha tới đúng trần (`targetCeiling`), tuyệt đối không kích hoạt `scroll in page`.
+  4. **Hãm Phanh Chống Vọt Lố (Ceiling Clamping)**: Khi người dùng vuốt nhanh (fast flick), khung cha được hãm phanh chuẩn xác tại trần trang kế tiếp (`right.scrollTop = nextCeiling`), phần lực cuộn còn dư được chuyển tiếp mượt mà vào nội dung trang mới.
+  5. **Triệt tiêu Kẹt Đáy (Subpixel Tolerance & Unused Delta Forwarding)**:
+     - Nâng ngưỡng nhận diện đáy an toàn từ `1px` lên `3px`.
+     - Đo lường thực tế `actualScrolled = bodyCurr.scrollTop - prevScroll`. Nếu `actualScrolled < deltaY` (do đã chạm đáy vật lý), toàn bộ phần delta dư thừa `unusedDelta = deltaY - actualScrolled` được lập tức chuyển tiếp ra khung cha `right.scrollTop += unusedDelta` để đẩy sang trang kế tiếp mượt mà, không bao giờ bị đứng. Áp dụng cơ chế đối xứng hoàn hảo cho chiều cuộn ngược lên.

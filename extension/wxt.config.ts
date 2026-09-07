@@ -8,7 +8,7 @@ export default defineConfig({
     short_name: 'Live-Trans',
     description:
       'Dịch live âm thanh/video với bảo toàn thuật ngữ học thuật — miễn phí cho học sinh/sinh viên.',
-    version: '1.0.1',
+    version: '1.0.2',
     permissions: ['storage', 'tabCapture', 'offscreen', 'activeTab', 'scripting', 'tabs', 'contextMenus'],
     host_permissions: ['<all_urls>'],
     action: {
