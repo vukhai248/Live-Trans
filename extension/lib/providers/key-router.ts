@@ -106,7 +106,7 @@ export class KeyRouter {
           msg.includes('rate_limit') ||
           msg.includes('Quota exceeded');
         if (isQuota) {
-          throw new Error('Đã chạm hạn mức Rate Limit (429) hoặc Quota của API Key. Vui lòng thử lại sau hoặc thêm API Key dự phòng trong Cài đặt.');
+          throw new Error('Đã chạm hạn mức Rate Limit (429) hoặc Quota của API Key. Vui lòng thử lại sau hoặc thêm API Key dự phòng trong Cài đặt.', { cause: err });
         }
         throw err;
       }

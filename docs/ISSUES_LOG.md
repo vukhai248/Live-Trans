@@ -22,6 +22,7 @@ Tài liệu này tổng hợp toàn bộ các lỗi phát sinh trong quá trình
 | **ISSUE-012** | UI / Splitter Performance | Khi kéo thanh chia đôi màn hình giữa 2 khung (Splitter), giao diện bị giật lag nghiêm trọng (kể cả khi chưa dịch gì). | `onPointerMove` gọi `setSplitRatio` liên tục trên từng pixel, gây bão re-render toàn bộ `ViewerApp`; kéo theo `leftFitScale` và `rightFitScale` đổi liên tục kích hoạt `page.render()` vẽ lại hàng loạt canvas PDF.js HiDPI trên main thread. | Tách biệt thao tác kéo khỏi render nặng (Direct CSS Dragging + Commit on release): (1) Khi kéo chuột, chỉ thay đổi trực tiếp `width` 2 khung qua CSS DOM bằng `requestAnimationFrame`, đồng thời bật `body.lt-resizing` (`user-select: none; pointer-events: none;`); (2) Chỉ khi nhả chuột (`pointerup`) mới gọi `setSplitRatio` và tính lại scale để render canvas đúng 1 lần duy nhất, đạt 60 - 120 FPS mượt mà. | ✅ Đã hoàn thành & Kiểm chứng |
 | **ISSUE-013** | Storage / Persistent Cache | Bản dịch Vision AI mất sạch khi người dùng đóng tab hoặc thoát trình duyệt Chrome, gây lãng phí lớn thời gian dịch lại và quota API; thiếu cơ chế giới hạn dung lượng và thời hạn bộ nhớ đệm thông minh. | Sử dụng `sessionStorage` thuần túy (vốn tự hủy ngay khi đóng tab hoặc đóng cửa sổ); không có Registry quản lý metadata, không có thuật toán giải phóng bộ nhớ. | Triển khai **Smart Persistent Cache**: (1) Sử dụng `localStorage` lưu trữ bền vững qua các phiên trình duyệt, nạp tức thì 0ms; (2) **LRU Eviction (50 bài báo gần nhất)** tự động dọn các bài cũ nhất khi vượt định mức hoặc đầy quota; (3) **TTL Expiration (14 ngày)** tự động xóa các bài quá hạn 14 ngày không đọc; (4) Hỗ trợ xóa cache chủ động khi bấm "Dịch lại" hoặc "Xóa cache & Dịch lại" trong Cài đặt. | ✅ Đã hoàn thành & Kiểm chứng |
 | **ISSUE-014** | Onboarding / First-run UX | Khi người dùng mới cài đặt lần đầu và mở PDF Viewer mà chưa nhập API Key, hàng đợi thác nước tự động gọi AI dịch ngầm và báo lỗi đỏ ở từng trang ("Không thể dịch Trang X"), gây bối rối cho người dùng mới. | Trình đọc PDF khởi động với mode mặc định là Vision AI và tự động kích hoạt hàng đợi dịch thác nước ngay khi nạp tài liệu mà chưa kiểm tra xem người dùng đã cấu hình API Key hay chưa. | (1) Ngắt kết nối nạp key từ `.env`; (2) Thêm Banner cảnh báo màu cam ở đầu khung dịch tạm dừng hàng đợi ngầm; (3) Giao diện Quản lý Đa API Key với nút `+` và dropdown chọn provider; (4) Smart Router chỉ rotate khi $\ge 2$ keys, nếu 1 key thì báo lỗi limit; (5) Popup hỏi lựa chọn dịch lại sau khi lưu key. | ✅ Đã khắc phục & Kiểm chứng |
+| **ISSUE-015** | CI / Code Quality (ESLint) | GitHub Actions CI luôn báo đỏ (fail) khi push commit lên nhánh `main` hoặc tạo release tag. | `extension/lib/providers/key-router.ts:109`: Lệnh `throw new Error(...)` không đính kèm `{ cause: err }`, vi phạm quy tắc `preserve-caught-error` của ESLint; `package-lock.json` chưa đồng bộ version `1.0.1`. | Bổ sung `{ cause: err }` vào lệnh throw Error; đồng bộ version `package-lock.json` lên `1.0.1`; kiểm thử cục bộ `npm run check` vượt qua 100%. | ✅ Đã khắc phục & Kiểm chứng |
 
 ---
 
@@ -127,3 +128,28 @@ flowchart TD
     - Hướng dẫn: *"Để bắt đầu dịch tài liệu AI/học thuật với giữ nguyên công thức toán KaTeX & hình ảnh, vui lòng nhập Google Gemini API Key (hoàn toàn miễn phí)."*
     - Nút bấm trực tiếp: *"⚙️ Mở Cài đặt nhập Key (1 click)"* kèm link hướng dẫn lấy key trong 30 giây tại `aistudio.google.com`.
   - Tự động bắt đầu dịch ngay khi người dùng lưu key thành công.
+
+---
+
+## 6. Phân tích Chi tiết ISSUE-015: GitHub Actions CI Thất Bại Khi Push
+
+- **Hiện tượng**: Khi push commit lên GitHub (như commit `6f69fc6` hoặc tag `v1.0.1`), pipeline CI của GitHub Actions (`.github/workflows/ci.yml`) luôn báo thất bại (exit code 1, xem run `34055478033` và `34055497509`).
+- **Nguyên nhân gốc rễ**:
+  1. Trong quy trình CI, bước `npm run check` thực thi lần lượt:
+     - `wxt prepare` (Pass)
+     - `tsc --noEmit` (Pass)
+     - `eslint .` (Fail)
+  2. Tại `extension/lib/providers/key-router.ts` dòng 109, khi xử lý lỗi quota cho trường hợp 1 API Key đơn lẻ:
+     ```ts
+     throw new Error('Đã chạm hạn mức Rate Limit (429) hoặc Quota của API Key. Vui lòng thử lại sau hoặc thêm API Key dự phòng trong Cài đặt.');
+     ```
+     Lệnh này re-throw một Error mới mà không truyền kèm đối tượng lỗi gốc `err` qua thuộc tính `{ cause: err }`, vi phạm quy chuẩn `preserve-caught-error` của bộ quy tắc ESLint.
+  3. File `extension/package-lock.json` có trường `"version": "0.1.0"`, trong khi `package.json` đã được nâng cấp lên `1.0.1`.
+- **Giải pháp xử lý đề xuất**:
+  1. Sửa `key-router.ts` dòng 109:
+     ```ts
+     throw new Error('Đã chạm hạn mức Rate Limit (429) hoặc Quota của API Key. Vui lòng thử lại sau hoặc thêm API Key dự phòng trong Cài đặt.', { cause: err });
+     ```
+  2. Đồng bộ version trong `extension/package-lock.json` lên `1.0.1`.
+  3. Chạy kiểm chứng toàn bộ `npm run check` (`wxt prepare` + `tsc` + `eslint` + `vitest`) đảm bảo 100% xanh trước khi commit và push lại lên Git.
+
