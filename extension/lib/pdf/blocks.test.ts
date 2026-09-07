@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractPageFigures, extractTextBlocks, isMathFormula, joinLinesWithDehyphenation, type RawTextItem } from './blocks';
+import { extractPageFigures, extractTextBlocks, isMathFragment, joinLinesWithDehyphenation, type RawTextItem } from './blocks';
 
 
 describe('PDF text blocks extractor', () => {
@@ -156,28 +156,28 @@ describe('PDF text blocks extractor', () => {
   });
 
   it('detects standalone math equations and labels', () => {
-    expect(isMathFormula('(1)')).toBe(true);
-    expect(isMathFormula('(2.3)')).toBe(true);
-    expect(isMathFormula('z_t = \\sqrt{\\alpha_t} z_0 + \\epsilon')).toBe(true);
-    expect(isMathFormula('This is standard text describing the experiment.')).toBe(false);
+    expect(isMathFragment('(1)')).toBe(true);
+    expect(isMathFragment('(2.3)')).toBe(true);
+    expect(isMathFragment('z_t = \\sqrt{\\alpha_t} z_0 + \\epsilon')).toBe(true);
+    expect(isMathFragment('This is standard text describing the experiment.')).toBe(false);
   });
 
   it('P1: does not mark prose ending with a year citation as formula', () => {
     expect(
-      isMathFormula('As shown by previous work on diffusion models (Song & Ermon, 2020)'),
+      isMathFragment('As shown by previous work on diffusion models (Song & Ermon, 2020)'),
     ).toBe(false);
-    expect(isMathFormula('The results were first reported in the year 2020')).toBe(false);
+    expect(isMathFragment('The results were first reported in the year 2020')).toBe(false);
   });
 
   it('P1: does not mark hyphenated compounds as math fractions', () => {
-    expect(isMathFormula('state-of-the-art')).toBe(false);
-    expect(isMathFormula('deep-learning')).toBe(false);
-    expect(isMathFormula('learning-based')).toBe(false);
+    expect(isMathFragment('state-of-the-art')).toBe(false);
+    expect(isMathFragment('deep-learning')).toBe(false);
+    expect(isMathFragment('learning-based')).toBe(false);
   });
 
   it('P1: does not mark prose with a single inline equals as formula', () => {
     expect(
-      isMathFormula('The configuration sets the value where alpha equals beta in this context here today'),
+      isMathFragment('The configuration sets the value where alpha equals beta in this context here today'),
     ).toBe(false);
   });
 
@@ -369,7 +369,7 @@ describe('PDF text blocks extractor', () => {
     const path = await import('path');
     const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
 
-    const pdfPath = path.resolve(__dirname, '../../../backend/samples/2302.07121.pdf');
+    const pdfPath = path.resolve(__dirname, '../../../tests/fixtures/sample-paper.pdf');
     if (!fs.existsSync(pdfPath)) return;
 
     const data = new Uint8Array(fs.readFileSync(pdfPath));

@@ -59,7 +59,7 @@ export function sanitizeTeXMathCharacters(text: string): string {
  * Normalizes raw PDF.js TextItems into top-left coordinate space (scale = 1.0).
  * Filters out rotated margin watermarks (e.g. "arXiv:2302.07121v1 [cs.CV] 14 Feb 2023").
  */
-export function normalizeTextItems(
+function normalizeTextItems(
   items: RawTextItem[],
   viewportWidth: number,
   viewportHeight: number,
@@ -159,7 +159,7 @@ function detectColumnDivider(items: NormalizedItem[], viewportWidth: number): nu
 /**
  * Splits normalized text items into coherent horizontal lines.
  */
-export function groupIntoLines(items: NormalizedItem[], viewportWidth = 612): LineItem[] {
+function groupIntoLines(items: NormalizedItem[], viewportWidth = 612): LineItem[] {
   if (items.length === 0) return [];
 
   const dividerX = detectColumnDivider(items, viewportWidth);
@@ -302,7 +302,7 @@ function buildLine(items: NormalizedItem[], dividerX: number, viewportWidth: num
 /**
  * Checks if a text line is a standalone section heading (e.g. "Abstract", "1. Introduction").
  */
-export function isStandaloneHeading(text: string, bold = false): boolean {
+function isStandaloneHeading(text: string, bold = false): boolean {
   if (!text) return false;
   const t = text.trim();
   if (t.length > 80) return false;
@@ -385,18 +385,10 @@ export function isMathFragment(text: string): boolean {
   return false;
 }
 
-export function isDisplayEquation(text: string): boolean {
-  return isMathFragment(text);
-}
-
-export function isMathFormula(text: string): boolean {
-  return isMathFragment(text);
-}
-
 /**
  * Checks if a line belongs to an algorithm box (e.g. Algorithm 1 Universal Guidance, pseudocode steps).
  */
-export function isAlgorithmLine(text: string): boolean {
+function isAlgorithmLine(text: string): boolean {
   if (!text) return false;
   const t = text.trim();
 
@@ -413,7 +405,7 @@ export function isAlgorithmLine(text: string): boolean {
 /**
  * Checks if a line belongs to the footnote section at the bottom of the page.
  */
-export function isFootnoteItem(y: number, fontSize: number, text: string): boolean {
+function isFootnoteItem(y: number, fontSize: number, text: string): boolean {
   if (y > 670 && fontSize <= 8.5) return true;
   if (
     y > 640 &&
@@ -461,7 +453,7 @@ export function joinLinesWithDehyphenation(lines: LineItem[]): string {
 /**
  * Splits text into individual sentences, carefully protecting abbreviations.
  */
-export function splitTextIntoSentences(text: string): string[] {
+function splitTextIntoSentences(text: string): string[] {
   if (!text || text.length < 8) return [text];
 
   const clean = text.replace(/\s+/g, ' ').trim();
@@ -511,7 +503,7 @@ function isReferenceStartLine(text: string): boolean {
  * Groups lines into coherent text blocks / paragraphs.
  * Strictly isolates multi-line fraction equations, algorithm boxes, headings, figure captions, references, and footnotes.
  */
-export function groupIntoBlocks(lines: LineItem[], pageNumber: number): TextBlock[] {
+function groupIntoBlocks(lines: LineItem[], pageNumber: number): TextBlock[] {
   const first = lines[0];
   if (!first) return [];
 

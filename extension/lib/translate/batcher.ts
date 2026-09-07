@@ -129,11 +129,9 @@ export class Translator {
     glossary: GlossaryDoc,
   ): (TranslateBatchRequest & {
     termSubsets: GlossaryTerm[][];
-    maskMap: Record<string, string>;
   })[] {
     const requests: (TranslateBatchRequest & {
       termSubsets: GlossaryTerm[][];
-      maskMap: Record<string, string>;
     })[] = [];
 
     for (let base = 0; base < units.length; base += BATCH_SIZE) {
@@ -153,7 +151,6 @@ export class Translator {
         targetLang: this.settings.targetLang,
         sourceLang: this.settings.sourceLang,
         termSubsets,
-        maskMap: {},
       });
     }
     return requests;

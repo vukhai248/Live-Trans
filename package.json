@@ -1,0 +1,15 @@
+{
+  "name": "live-trans-monorepo-root",
+  "private": true,
+  "version": "1.0.1",
+  "description": "Root proxy — forwards npm scripts into extension/ (A15). No dependencies here.",
+  "scripts": {
+    "check": "npm run check --prefix extension",
+    "typecheck": "npm run typecheck --prefix extension",
+    "lint": "npm run lint --prefix extension",
+    "test": "npm run test --prefix extension",
+    "build": "npm run build --prefix extension",
+    "zip": "npm run zip --prefix extension",
+    "dev": "npm run dev --prefix extension"
+  }
+}

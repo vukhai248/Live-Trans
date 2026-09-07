@@ -32,83 +32,102 @@ export async function captureTabPcm(options: CaptureOptions): Promise<CaptureHan
     } as any,
   } as any);
 
-  // Loopback: keep playing the tab audio so the user still hears it.
-  const audioEl = new Audio();
-  audioEl.srcObject = stream;
-  void audioEl.play().catch(() => {});
-
-  const audioCtx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
-  if (audioCtx.state === 'suspended') {
-    await audioCtx.resume();
-  }
-
-  const source = audioCtx.createMediaStreamSource(stream);
-  const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-
-  // Emit first chunk early (10s) for instant user feedback, then full chunkSeconds
-  const firstChunkSeconds = Math.min(10, options.chunkSeconds);
-  let currentTargetSamples = CHUNK_SAMPLES(firstChunkSeconds);
-  let isFirstChunk = true;
-
-  let buffer = new Int16Array(currentTargetSamples);
-  let filled = 0;
-  let startedAt = 0;
-  let lastRms = 0;
-  const silenceWindow = 8_000; // ms
-
-  processor.onaudioprocess = (e) => {
-    const input = e.inputBuffer.getChannelData(0);
-    // Compute RMS for silence/DRM detection.
-    let sum = 0;
-    for (let i = 0; i < input.length; i++) sum += input[i]! * input[i]!;
-    const rms = Math.sqrt(sum / input.length);
-    lastRms = rms;
-    if (startedAt === 0) startedAt = performance.now();
-
-    for (let i = 0; i < input.length; i++) {
-      if (filled >= buffer.length) {
-        const base64 = int16ToBase64(buffer.subarray(0, filled));
-        const durationSec = isFirstChunk ? firstChunkSeconds : options.chunkSeconds;
-        options.onChunk(base64, startedAt, durationSec * 1000);
-        if (isFirstChunk) {
-          isFirstChunk = false;
-          currentTargetSamples = CHUNK_SAMPLES(options.chunkSeconds);
-        }
-        buffer = new Int16Array(currentTargetSamples);
-        filled = 0;
-        startedAt = performance.now();
-      }
-      const s = Math.max(-1, Math.min(1, input[i]!));
-      buffer[filled++] = s < 0 ? s * 0x8000 : s * 0x7fff;
-    }
-  };
-
-  source.connect(processor);
-  processor.connect(audioCtx.destination);
-
+  let audioEl: HTMLAudioElement | null = null;
+  let audioCtx: AudioContext | null = null;
+  let source: MediaStreamAudioSourceNode | null = null;
+  let processor: ScriptProcessorNode | null = null;
   let silenceTimer: ReturnType<typeof setInterval> | undefined;
-  if (options.onSilence) {
-    silenceTimer = setInterval(() => {
-      if (performance.now() - startedAt > silenceWindow && lastRms < 0.001) {
-        options.onSilence?.();
-      }
-    }, 2000);
-  }
 
-  return {
-    stop() {
-      if (silenceTimer) clearInterval(silenceTimer);
-      try {
-        processor.disconnect();
-        source.disconnect();
-        void audioCtx.close();
-        audioEl.srcObject = null;
-        stream.getTracks().forEach((t) => t.stop());
-      } catch {
-        /* ignore teardown errors */
+  try {
+    // Loopback: keep playing the tab audio so the user still hears it.
+    audioEl = new Audio();
+    audioEl.srcObject = stream;
+    void audioEl.play().catch(() => {});
+
+    audioCtx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume();
+    }
+
+    source = audioCtx.createMediaStreamSource(stream);
+    processor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+    // Emit first chunk early (10s) for instant user feedback, then full chunkSeconds
+    const firstChunkSeconds = Math.min(10, options.chunkSeconds);
+    let currentTargetSamples = CHUNK_SAMPLES(firstChunkSeconds);
+    let isFirstChunk = true;
+
+    let buffer = new Int16Array(currentTargetSamples);
+    let filled = 0;
+    let startedAt = 0;
+    let lastRms = 0;
+    const silenceWindow = 8_000; // ms
+
+    processor.onaudioprocess = (e) => {
+      const input = e.inputBuffer.getChannelData(0);
+      // Compute RMS for silence/DRM detection.
+      let sum = 0;
+      for (let i = 0; i < input.length; i++) sum += input[i]! * input[i]!;
+      const rms = Math.sqrt(sum / input.length);
+      lastRms = rms;
+      if (startedAt === 0) startedAt = performance.now();
+
+      for (let i = 0; i < input.length; i++) {
+        if (filled >= buffer.length) {
+          const base64 = int16ToBase64(buffer.subarray(0, filled));
+          const durationSec = isFirstChunk ? firstChunkSeconds : options.chunkSeconds;
+          options.onChunk(base64, startedAt, durationSec * 1000);
+          if (isFirstChunk) {
+            isFirstChunk = false;
+            currentTargetSamples = CHUNK_SAMPLES(options.chunkSeconds);
+          }
+          buffer = new Int16Array(currentTargetSamples);
+          filled = 0;
+          startedAt = performance.now();
+        }
+        const s = Math.max(-1, Math.min(1, input[i]!));
+        buffer[filled++] = s < 0 ? s * 0x8000 : s * 0x7fff;
       }
-    },
-  };
+    };
+
+    source.connect(processor);
+    processor.connect(audioCtx.destination);
+
+    if (options.onSilence) {
+      silenceTimer = setInterval(() => {
+        if (performance.now() - startedAt > silenceWindow && lastRms < 0.001) {
+          options.onSilence?.();
+        }
+      }, 2000);
+    }
+
+    return {
+      stop() {
+        if (silenceTimer) clearInterval(silenceTimer);
+        try {
+          processor?.disconnect();
+          source?.disconnect();
+          void audioCtx?.close();
+          if (audioEl) audioEl.srcObject = null;
+          stream.getTracks().forEach((t) => t.stop());
+        } catch {
+          /* ignore teardown errors */
+        }
+      },
+    };
+  } catch (err) {
+    if (silenceTimer) clearInterval(silenceTimer);
+    try {
+      processor?.disconnect();
+      source?.disconnect();
+      void audioCtx?.close();
+      if (audioEl) audioEl.srcObject = null;
+    } catch {
+      /* ignore cleanup error */
+    }
+    stream.getTracks().forEach((t) => t.stop());
+    throw err;
+  }
 }
 
 /** Efficient Int16 → base64 (binary string via chunked btoa). */

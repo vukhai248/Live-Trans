@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
-import { STARTER_GLOSSARY, type GlossaryTerm, type TermType } from '@/lib/glossary/types';
-import { clampChunk, loadSettings, saveSettings, type Settings } from '@/lib/settings';
+import { browser } from 'wxt/browser';
+import { GlossaryEditor } from '@/components/GlossaryEditor';
+import { clampChunk, loadSettings, saveSettings, SETTINGS_KEY, type Settings } from '@/lib/settings';
 
 type Tab = 'general' | 'glossary';
 
@@ -11,6 +12,20 @@ export function App() {
 
   useEffect(() => {
     void loadSettings().then(setSettings);
+
+    const handleStorageChange = (
+      changes: Record<string, any>,
+      areaName: string,
+    ) => {
+      if (areaName === 'local' && SETTINGS_KEY in changes) {
+        void loadSettings().then(setSettings);
+      }
+    };
+
+    browser.storage.onChanged.addListener(handleStorageChange);
+    return () => {
+      browser.storage.onChanged.removeListener(handleStorageChange);
+    };
   }, []);
 
   if (!settings) return <div class="loading">Đang tải…</div>;
@@ -58,7 +73,11 @@ export function App() {
       {tab === 'general' ? (
         <General settings={settings} update={update} />
       ) : (
-        <Glossary settings={settings} update={update} />
+        <GlossaryEditor
+          glossary={settings.glossary}
+          onChange={(g) => update({ glossary: g })}
+          variant="full"
+        />
       )}
 
       <p class="hint">
@@ -213,156 +232,6 @@ function General({
   );
 }
 
-function Glossary({
-  settings,
-  update,
-}: {
-  settings: Settings;
-  update: (p: Partial<Settings>) => void;
-}) {
-  const terms = settings.glossary.terms;
-  const [draft, setDraft] = useState<GlossaryTerm>({ term: '', type: 'command', vi: '' });
-
-  function addTerm(): void {
-    if (!draft.term.trim()) return;
-    update({
-      glossary: {
-        version: 1,
-        terms: [
-          ...terms,
-          { ...draft, term: draft.term.trim(), vi: draft.vi?.trim() || undefined },
-        ],
-      },
-    });
-    setDraft({ term: '', type: 'command', vi: '' });
-  }
-
-  function removeAt(i: number): void {
-    update({ glossary: { version: 1, terms: terms.filter((_, idx) => idx !== i) } });
-  }
-
-  async function exportJson(): Promise<void> {
-    const blob = new Blob([JSON.stringify(settings.glossary, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'live-trans-glossary.json';
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  async function importJson(file: File): Promise<void> {
-    const text = await file.text();
-    try {
-      const parsed = JSON.parse(text) as { terms?: GlossaryTerm[] };
-      if (!Array.isArray(parsed.terms)) throw new Error('bad shape');
-      update({ glossary: { version: 1, terms: parsed.terms } });
-    } catch {
-      window.alert('File glossary không hợp lệ (cần {"version":1,"terms":[...]}).');
-    }
-  }
-
-  return (
-    <section class="card">
-      <div class="glossary-head">
-        <h2>Glossary ({terms.length} thuật ngữ)</h2>
-        <div class="actions">
-          <button class="ghost" onClick={() => update({ glossary: STARTER_GLOSSARY })}>
-            Nạp bộ mẫu
-          </button>
-          <button class="ghost" onClick={() => void exportJson()}>
-            Xuất JSON
-          </button>
-          <label class="ghost file">
-            Nhập JSON
-            <input
-              type="file"
-              accept="application/json"
-              onChange={(e) => {
-                const f = (e.target as HTMLInputElement).files?.[0];
-                if (f) void importJson(f);
-              }}
-            />
-          </label>
-        </div>
-      </div>
-
-      <div class="add-row">
-        <input
-          class="g-term"
-          placeholder="Thuật ngữ (vd: npm run start)"
-          value={draft.term}
-          onInput={(e) =>
-            setDraft({ ...draft, term: (e.target as HTMLInputElement).value })
-          }
-        />
-        <select
-          value={draft.type}
-          onChange={(e) =>
-            setDraft({
-              ...draft,
-              type: (e.target as HTMLSelectElement).value as TermType,
-            })
-          }
-        >
-          <option value="command">command</option>
-          <option value="code">code</option>
-          <option value="jargon">jargon</option>
-          <option value="acronym">acronym</option>
-        </select>
-        <input
-          class="g-vi"
-          placeholder="Dịch (jargon/acronym)"
-          value={draft.vi ?? ''}
-          onInput={(e) =>
-            setDraft({ ...draft, vi: (e.target as HTMLInputElement).value })
-          }
-        />
-        <button class="primary small" onClick={addTerm}>
-          Thêm
-        </button>
-      </div>
-
-      <table>
-        <thead>
-          <tr>
-            <th>Thuật ngữ</th>
-            <th>Loại</th>
-            <th>Dịch</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {terms.map((t, i) => (
-            <tr key={`${t.term}-${i}`}>
-              <td>
-                <code>{t.term}</code>
-              </td>
-              <td>
-                <span class={`tag tag-${t.type}`}>{t.type}</span>
-              </td>
-              <td class="muted">{t.vi ?? '—'}</td>
-              <td>
-                <button class="ghost danger" onClick={() => removeAt(i)}>
-                  Xoá
-                </button>
-              </td>
-            </tr>
-          ))}
-          {terms.length === 0 && (
-            <tr>
-              <td colspan={4} class="empty">
-                Chưa có thuật ngữ. Thêm hoặc "Nạp bộ mẫu".
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </section>
-  );
-}
 
 function ModeButton({
   title,

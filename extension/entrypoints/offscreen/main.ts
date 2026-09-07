@@ -8,7 +8,7 @@ import { createProvider } from '@/lib/providers';
 import { loadSettings, type Settings } from '@/lib/settings';
 import { segment, type SubtitleUnit } from '@/lib/subtitles/segmenter';
 
-import { ConcurrencyQueue } from '@/lib/protocol/queue';
+import { ConcurrencyQueue, QueueCancelledError } from '@/lib/protocol/queue';
 
 let activeTabId: number | undefined;
 let capture: CaptureHandle | undefined;
@@ -163,6 +163,10 @@ async function runLiveSession(streamId: string, settings: Settings): Promise<voi
                 tabId: activeTabId,
               },
             }).catch(() => {});
+          }
+        }).catch((err) => {
+          if (!(err instanceof QueueCancelledError)) {
+            console.warn('[Offscreen] Task queue error:', err);
           }
         });
       },

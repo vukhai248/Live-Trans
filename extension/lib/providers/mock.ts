@@ -69,7 +69,7 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export function mockTranslate(masked: string, terms: GlossaryTerm[]): string {
+function mockTranslate(masked: string, terms: GlossaryTerm[]): string {
   let out = masked;
   // Jargon → authoritative translation (keeps TSR valid).
   for (const t of terms) {
@@ -83,7 +83,7 @@ export function mockTranslate(masked: string, terms: GlossaryTerm[]): string {
   return out.replace(/\s+/g, ' ').trim();
 }
 
-export function mockTranslateTitle(title: string): string {
+function mockTranslateTitle(title: string): string {
   if (title.trim().toLowerCase().includes(DEMO_TITLE_EN.toLowerCase()))
     return DEMO_TITLE_VI;
   return `[demo] ${title}`;

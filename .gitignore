@@ -25,6 +25,7 @@ venv/
 # Sample PDFs (nặng, tải lại bằng link trong HANDOFF) + output dịch
 backend/samples/
 backend/output/
+tests/fixtures/*.pdf
 
 # Extension packaging
 *.crx

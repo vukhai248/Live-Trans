@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { KeyRouter } from './key-router';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { clearKeyRouters, getKeyRouter, KeyRouter } from './key-router';
 
 describe('KeyRouter', () => {
   it('parses comma and newline separated keys', () => {
@@ -68,5 +68,43 @@ describe('KeyRouter', () => {
     ).rejects.toThrow('Đã chạm hạn mức Rate Limit (429) hoặc Quota của API Key');
 
     expect(calls).toEqual(['single-key']);
+  });
+
+  describe('getKeyRouter Registry', () => {
+    beforeEach(() => {
+      clearKeyRouters();
+    });
+
+    it('returns the same instance for identical keys and namespace', () => {
+      const r1 = getKeyRouter(['key1', 'key2'], 'gemini');
+      const r2 = getKeyRouter(['key1', 'key2'], 'gemini');
+      expect(r1).toBe(r2);
+    });
+
+    it('maintains separate instances and preserves cooldown across namespaces', () => {
+      const geminiRouter = getKeyRouter(['gemini-k1', 'gemini-k2'], 'gemini');
+      const zenRouter = getKeyRouter(['zen-k1', 'zen-k2'], 'zen');
+
+      expect(geminiRouter).not.toBe(zenRouter);
+
+      // Mark gemini-k1 as 429 limited
+      geminiRouter.markRateLimited('gemini-k1', 120);
+      expect(geminiRouter.getCurrentKey()).toBe('gemini-k2');
+
+      // Access zenRouter, make sure it is unaffected
+      expect(zenRouter.getCurrentKey()).toBe('zen-k1');
+
+      // Re-fetch gemini router from registry: cooldown of gemini-k1 MUST be preserved!
+      const geminiRouterRefetched = getKeyRouter(['gemini-k1', 'gemini-k2'], 'gemini');
+      expect(geminiRouterRefetched).toBe(geminiRouter);
+      expect(geminiRouterRefetched.getCurrentKey()).toBe('gemini-k2');
+    });
+
+    it('clears registry when clearKeyRouters is called', () => {
+      const r1 = getKeyRouter(['k1', 'k2'], 'gemini');
+      clearKeyRouters();
+      const r2 = getKeyRouter(['k1', 'k2'], 'gemini');
+      expect(r1).not.toBe(r2);
+    });
   });
 });

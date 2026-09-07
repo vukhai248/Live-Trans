@@ -476,7 +476,7 @@ export function getVisionCacheStats(): { paperCount: number; maxPapers: number; 
  * - Algorithm structure lines
  * - Bibliography / References entries
  */
-export function detectEnglishInMarkdown(markdown: string): boolean {
+function detectEnglishInMarkdown(markdown: string): boolean {
   const lines = markdown.split('\n');
   let englishBlockCount = 0;
 
@@ -528,7 +528,7 @@ export function detectEnglishInMarkdown(markdown: string): boolean {
  * If detected, invokes a pure text translation pass (with no visual anchor) to repair
  * the paragraphs into academic Vietnamese while strictly preserving LaTeX math and figures.
  */
-export async function verifyAndRepairTranslation(
+async function verifyAndRepairTranslation(
   markdown: string,
   settings: Settings,
 ): Promise<string> {

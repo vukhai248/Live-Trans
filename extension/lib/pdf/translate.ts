@@ -111,7 +111,7 @@ function hashString(s: string): string {
   return (h >>> 0).toString(36);
 }
 
-export function getCacheKey(
+function getCacheKey(
   pdfUrl: string,
   pageNumber: number,
   targetLang = '',
@@ -124,7 +124,7 @@ export function getCacheKey(
   return `live_trans_pdf_${urlHash}_p${pageNumber}${suffix}${providerModel ? `_m${providerModel}` : ''}`;
 }
 
-export function getGlossaryHash(settings: Settings): string {
+function getGlossaryHash(settings: Settings): string {
   try {
     const terms = settings.glossary?.terms || [];
     return hashString(JSON.stringify(terms.map((t) => [t.term, t.vi || '', t.type || ''])));

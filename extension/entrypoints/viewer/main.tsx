@@ -7,7 +7,6 @@ import { translatePageBlocks } from '@/lib/pdf/translate';
 import { WhiteboardPageRenderer } from './WhiteboardPageRenderer';
 import { VisionPageRenderer } from './VisionPageRenderer';
 import { translatePageVision, getCachedVisionTranslation, clearCachedVisionTranslation, pruneVisionCacheRegistry } from '@/lib/pdf/vision-translate';
-import { computeReflowOffsets } from '@/lib/pdf/reflow';
 import type { TextBlock, TranslatedBlock, ViewMode } from '@/lib/pdf/types';
 import {
   loadSettings,
@@ -816,22 +815,6 @@ export function ViewerApp() {
     }
   };
 
-  // Reset bố cục component toàn tài liệu (toolbar).
-  const [_layoutResetSignal, setLayoutResetSignal] = useState<number>(0);
-  const resetAllLayouts = () => {
-    try {
-      const doomed: string[] = [];
-      for (let i = 0; i < sessionStorage.length; i++) {
-        const k = sessionStorage.key(i);
-        if (k && k.startsWith('live_trans_layout_')) doomed.push(k);
-      }
-      for (const k of doomed) sessionStorage.removeItem(k);
-    } catch {
-      /* ignore */
-    }
-    setLayoutResetSignal((n) => n + 1);
-  };
-
   // Jump to specific page
   const scrollToPage = (pageNumber: number) => {
     setCurrentPage(pageNumber);
@@ -1376,16 +1359,6 @@ export function ViewerApp() {
                     class="lt-btn"
                     style={{ flex: 1 }}
                     onClick={() => {
-                      resetAllLayouts();
-                      alert('Đã khôi phục bố cục tất cả components về vị trí gốc!');
-                    }}
-                  >
-                    ⟲ Đặt lại bố cục
-                  </button>
-                  <button
-                    class="lt-btn"
-                    style={{ flex: 1 }}
-                    onClick={() => {
                       retranslateAll();
                       setIsSettingsOpen(false);
                     }}
@@ -1595,12 +1568,10 @@ export function ViewerApp() {
                   pdfDoc={pdfDoc}
                   pageNumber={idx + 1}
                   scale={effectiveLeftScale}
-                  type="original"
                   blocks={pageBlocks[idx + 1] || []}
                   hoveredSentenceId={hoveredSentenceId}
                   onHoverSentence={setHoveredSentenceId}
                   onVisible={readerMode === 'vision' ? debouncedPrioritizePage : triggerPageTranslation}
-                  status={pageStatus[idx + 1]}
                 />
               ))}
             </div>
@@ -1760,52 +1731,20 @@ interface PageRendererProps {
   pdfDoc: PDFDocumentProxy;
   pageNumber: number;
   scale: number;
-  type: 'original' | 'translated';
   blocks: (TextBlock | TranslatedBlock)[];
   hoveredSentenceId: string | null;
   onHoverSentence: (id: string | null) => void;
   onVisible: (pageNumber: number) => void;
-  status?: 'loading' | 'done' | 'error';
-  untranslatedCount?: number;
-  onRetry?: (pageNumber: number) => void;
-  /** URL PDF (để lưu layout component) + tín hiệu reset bố cục. */
-  docUrl?: string;
-  layoutResetSignal?: number;
-}
-
-/** Ghi đè vị trí/kích thước component do user kéo-thả (cộng thêm sau reflow). */
-export interface BlockLayoutOverride {
-  dx: number;
-  dy: number;
-  /** Chiều rộng custom (px, css) — undefined = theo bbox gốc. */
-  w?: number;
-}
-
-function loadPageLayout(docUrl: string, pageNumber: number): Record<string, BlockLayoutOverride> {
-  try {
-    const raw = sessionStorage.getItem(`live_trans_layout_${docUrl}_p${pageNumber}`);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, BlockLayoutOverride>;
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
 }
 
 function PageRenderer({
   pdfDoc,
   pageNumber,
   scale,
-  type,
   blocks,
   hoveredSentenceId,
   onHoverSentence,
   onVisible,
-  status,
-  untranslatedCount,
-  onRetry,
-  docUrl,
-  layoutResetSignal,
 }: PageRendererProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1815,84 +1754,6 @@ function PageRenderer({
   });
   // P0: chỉ raster canvas khi trang vào viewport (tiết kiệm CPU/RAM trên PC mở nhiều trang)
   const [isVisible, setIsVisible] = useState<boolean>(false);
-  // Reflow: chiều cao tự nhiên của từng block dịch (đo từ DOM) để push-down.
-  const [natHeights, setNatHeights] = useState<Record<string, number>>({});
-
-  const reportHeight = useCallback((id: string, h: number) => {
-    setNatHeights((prev) => (prev[id] === h ? prev : { ...prev, [id]: h }));
-  }, []);
-
-  // Chỉ pane dịch mới reflow; pane gốc giữ khớp canvas tuyệt đối.
-  const reflow = useMemo(
-    () =>
-      type === 'translated'
-        ? computeReflowOffsets(blocks, scale, natHeights)
-        : { offsets: {} as Record<string, number>, extraHeight: 0 },
-    [type, blocks, scale, natHeights],
-  );
-
-  // Layout component do user kéo-thả (chỉ pane dịch) — cộng thêm sau reflow.
-  const layoutEnabled = type === 'translated' && !!docUrl;
-  const [layoutOv, setLayoutOv] = useState<Record<string, BlockLayoutOverride>>(() =>
-    layoutEnabled && docUrl ? loadPageLayout(docUrl, pageNumber) : {},
-  );
-  const [selectedBlock, setSelectedBlock] = useState<string | null>(null);
-
-  // Reset bố cục từ toolbar: xoá state + storage.
-  useEffect(() => {
-    if (!layoutEnabled || !docUrl || !layoutResetSignal) return;
-    setLayoutOv({});
-    setSelectedBlock(null);
-    try {
-      sessionStorage.removeItem(`live_trans_layout_${docUrl}_p${pageNumber}`);
-    } catch {
-      /* ignore */
-    }
-  }, [layoutResetSignal, layoutEnabled, docUrl, pageNumber]);
-
-  const moveBlock = useCallback(
-    (id: string, dx: number, dy: number) => {
-      if (!layoutEnabled) return;
-      setLayoutOv((prev) => {
-        const cur = prev[id] || { dx: 0, dy: 0 };
-        const next = { ...prev, [id]: { ...cur, dx: Math.round(dx), dy: Math.round(dy) } };
-        if (docUrl) {
-          try {
-            sessionStorage.setItem(
-              `live_trans_layout_${docUrl}_p${pageNumber}`,
-              JSON.stringify(next),
-            );
-          } catch {
-            /* ignore */
-          }
-        }
-        return next;
-      });
-    },
-    [layoutEnabled, docUrl, pageNumber],
-  );
-
-  const resizeBlock = useCallback(
-    (id: string, w: number) => {
-      if (!layoutEnabled) return;
-      setLayoutOv((prev) => {
-        const cur = prev[id] || { dx: 0, dy: 0 };
-        const next = { ...prev, [id]: { ...cur, w: Math.max(60, Math.round(w)) } };
-        if (docUrl) {
-          try {
-            sessionStorage.setItem(
-              `live_trans_layout_${docUrl}_p${pageNumber}`,
-              JSON.stringify(next),
-            );
-          } catch {
-            /* ignore */
-          }
-        }
-        return next;
-      });
-    },
-    [layoutEnabled, docUrl, pageNumber],
-  );
 
   // Observe page visibility to trigger lazy translation + lazy canvas
   useEffect(() => {
@@ -1967,141 +1828,58 @@ function PageRenderer({
       data-page-number={pageNumber}
       style={{
         width: `${dimensions.width}px`,
-        height: `${dimensions.height + reflow.extraHeight}px`,
+        height: `${dimensions.height}px`,
       }}
     >
       {/* Background canvas (images, vectors, math formulas) */}
       <canvas ref={canvasRef} class="lt-page-canvas" />
 
-      {/* Translation loading status badge */}
-      {type === 'translated' && (
-        <div class="lt-page-status-wrap">
-          {status === 'loading' && (
-            <div class="lt-page-status lt-status-loading">
-              <div class="lt-spinner" /> Đang dịch trang {pageNumber}...
-            </div>
-          )}
-          {status === 'done' && (untranslatedCount || 0) === 0 && (
-            <div class="lt-page-status lt-status-done">✓ Đã dịch trang {pageNumber}</div>
-          )}
-          {status === 'done' && (untranslatedCount || 0) > 0 && (
-            <div class="lt-page-status lt-status-loading">
-              ⚠ Trang {pageNumber}: còn {untranslatedCount} đoạn gốc
-            </div>
-          )}
-          {status === 'error' && (
-            <div class="lt-page-status lt-status-error">
-              ⚠ Lỗi dịch trang {pageNumber}
-              <button
-                class="lt-retry-btn"
-                style={{ pointerEvents: 'auto' }}
-                onClick={() => onRetry?.(pageNumber)}
-              >
-                Thử lại
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Overlay text blocks with Precision Sentence-Level Hover Tracking (Ảnh 2 & 4) */}
-      {/* Reflow + Component: block dịch là component kéo-thả/resize được, chữ re-wrap */}
+      {/* Overlay text blocks with Precision Sentence-Level Hover Tracking */}
       <div class="lt-overlay-layer">
-        {blocks.map((b, order) => {
-          const ov = layoutOv[b.id];
-          return (
-            <FlowBlock
-              key={b.id}
-              b={b}
-              scale={scale}
-              type={type}
-              offsetY={reflow.offsets[b.id] || 0}
-              dx={ov?.dx || 0}
-              dy={ov?.dy || 0}
-              customW={ov?.w}
-              zOrder={order}
-              selected={selectedBlock === b.id}
-              movable={layoutEnabled && !b.isFormula}
-              hoveredSentenceId={hoveredSentenceId}
-              onHoverSentence={onHoverSentence}
-              onMeasure={type === 'translated' ? reportHeight : undefined}
-              onSelect={setSelectedBlock}
-              onMove={moveBlock}
-              onResizeW={resizeBlock}
-            />
-          );
-        })}
+        {blocks.map((b) => (
+          <FlowBlock
+            key={b.id}
+            b={b}
+            scale={scale}
+            hoveredSentenceId={hoveredSentenceId}
+            onHoverSentence={onHoverSentence}
+          />
+        ))}
       </div>
     </div>
   );
 }
 
-/* computeReflowOffsets nằm ở @/lib/pdf/reflow (pure, có unit test riêng). */
-
 interface FlowBlockProps {
   b: TextBlock | TranslatedBlock;
   scale: number;
-  type: 'original' | 'translated';
-  /** Độ đẩy xuống do các block cùng cột phía trên nở ra (reflow). */
-  offsetY: number;
-  /** Ghi đè vị trí do user kéo (cộng thêm sau reflow). */
-  dx: number;
-  dy: number;
-  /** Chiều rộng custom do user resize (undefined = theo bbox gốc). */
-  customW?: number;
-  /** Thứ tự vẽ (block sau đè block trước khi user cố tình chồng). */
-  zOrder: number;
-  selected: boolean;
-  /** Chỉ pane dịch (trừ formula keep-out) mới kéo-thả được. */
-  movable: boolean;
   hoveredSentenceId: string | null;
   onHoverSentence: (id: string | null) => void;
-  /** Báo chiều cao tự nhiên về parent (chỉ pane dịch). */
-  onMeasure?: (id: string, naturalHeight: number) => void;
-  onSelect: (id: string | null) => void;
-  onMove: (id: string, dx: number, dy: number) => void;
-  onResizeW: (id: string, w: number) => void;
 }
 
 /**
- * Component dịch: mặc định xếp y hệt paper (bbox gốc + reflow push-down),
- * user kéo tay cầm ⠿ để di chuyển tự do, kéo góc ◢ để đổi rộng (chữ re-wrap,
- * reflow tự tính lại — không bao giờ tràn/đè mặc định).
+ * Component overlay cho trang gốc: render các span trong suốt phủ lên canvas gốc
+ * để bắt sự kiện hover chuột từng câu và đồng bộ highlight hai chiều với bản dịch.
  */
 function FlowBlock({
   b,
   scale,
-  type,
-  offsetY,
-  dx,
-  dy,
-  customW,
-  zOrder,
-  selected,
-  movable,
   hoveredSentenceId,
   onHoverSentence,
-  onMeasure,
-  onSelect,
-  onMove,
-  onResizeW,
 }: FlowBlockProps) {
-  const ref = useRef<HTMLDivElement>(null);
-
   const [bx, by, bw, bh] = b.bbox;
   const left = bx * scale;
   const top = by * scale;
   const width = bw * scale;
   const height = bh * scale;
 
-  const isTranslated = type === 'translated';
   const isFormula = b.isFormula;
-  const isAlgorithm = b.isAlgorithm;
   const isHeader = b.isHeader;
   const isHeading = b.isHeading;
   const isFootnote = b.isFootnote;
+  const isAlgorithm = b.isAlgorithm;
 
-  // Cỡ chữ gốc (không co): footnote/algo hơi nhỏ hơn như bản gốc.
+  // Cỡ chữ gốc (không co): footnote/algo hơi nhỏ hơn như bản gốc
   const baseFontSize = isFootnote
     ? Math.max(7.2, (b.fontSize || 7.5) * scale * 0.95)
     : isAlgorithm
@@ -2109,168 +1887,42 @@ function FlowBlock({
       : Math.max(7.2, (b.fontSize || 9.5) * scale);
   const computedLineHeight = isFootnote ? 1.2 : isAlgorithm ? 1.3 : 1.24;
 
-  const isAbstract = b.text.trim().toLowerCase() === 'abstract';
-
   const sentenceItems =
     b.sentences && b.sentences.length > 0
       ? b.sentences
-      : [{ id: b.id, text: b.text, translation: (b as TranslatedBlock).translation }];
-
-  // B1: đo liên tục bằng ResizeObserver (thay effect đo 1 lần).
-  // - Tự bắn lại khi layout đổi: font swap (Times fallback → font thật, KaTeX),
-  //   zoom, bản dịch về muộn, trang vào viewport, user resize rộng.
-  // - Quan sát content-box (kích thước), còn top/offsetY đổi không gây vòng lặp.
-  const transText = (b as TranslatedBlock).translation || b.text;
-  const boxWidth = customW ?? width;
-  useEffect(() => {
-    if (!onMeasure) return;
-    const el = ref.current;
-    if (!el) return;
-    let cancelled = false;
-    const report = () => {
-      if (!cancelled) onMeasure(b.id, el.scrollHeight);
-    };
-    report();
-    let ro: ResizeObserver | null = null;
-    if (typeof ResizeObserver !== 'undefined') {
-      ro = new ResizeObserver(report);
-      ro.observe(el);
-    }
-    if (document.fonts?.ready) {
-      document.fonts.ready.then(report).catch(() => {});
-    }
-    return () => {
-      cancelled = true;
-      ro?.disconnect();
-    };
-  }, [b.id, transText, baseFontSize, boxWidth, onMeasure]);
-
-  // Kéo-thả component bằng tay cầm (pointer capture, theo css px của trang).
-  const startDrag = (e: PointerEvent) => {
-    if (!movable) return;
-    e.preventDefault();
-    e.stopPropagation();
-    onSelect(b.id);
-    const handle = e.currentTarget as Element;
-    handle.setPointerCapture?.(e.pointerId);
-    const sx = e.clientX;
-    const sy = e.clientY;
-    const ox = dx;
-    const oy = dy;
-    const move = (ev: PointerEvent) => {
-      onMove(b.id, ox + (ev.clientX - sx), oy + (ev.clientY - sy));
-    };
-    const up = () => {
-      handle.removeEventListener('pointermove', move as EventListener);
-      handle.removeEventListener('pointerup', up as EventListener);
-      handle.removeEventListener('pointercancel', up as EventListener);
-    };
-    handle.addEventListener('pointermove', move as EventListener);
-    handle.addEventListener('pointerup', up as EventListener);
-    handle.addEventListener('pointercancel', up as EventListener);
-  };
-
-  // Resize rộng: chữ re-wrap → ResizeObserver đo lại → reflow tự tính lại.
-  const startResize = (e: PointerEvent) => {
-    if (!movable) return;
-    e.preventDefault();
-    e.stopPropagation();
-    onSelect(b.id);
-    const handle = e.currentTarget as Element;
-    handle.setPointerCapture?.(e.pointerId);
-    const sx = e.clientX;
-    const startW = customW ?? width;
-    const move = (ev: PointerEvent) => {
-      onResizeW(b.id, startW + (ev.clientX - sx));
-    };
-    const up = () => {
-      handle.removeEventListener('pointermove', move as EventListener);
-      handle.removeEventListener('pointerup', up as EventListener);
-      handle.removeEventListener('pointercancel', up as EventListener);
-    };
-    handle.addEventListener('pointermove', move as EventListener);
-    handle.addEventListener('pointerup', up as EventListener);
-    handle.addEventListener('pointercancel', up as EventListener);
-  };
+      : [{ id: b.id, text: b.text }];
 
   return (
     <div
-      ref={ref}
       data-block-id={b.id}
-      class={`lt-block ${isTranslated ? 'lt-block-trans' : 'lt-block-orig'} ${
-        isFormula ? 'lt-block-formula' : ''
-      } ${isHeader ? 'lt-block-header' : ''} ${isHeading ? 'lt-block-heading' : ''} ${
+      class={`lt-block lt-block-orig ${isFormula ? 'lt-block-formula' : ''} ${
+        isHeader ? 'lt-block-header' : ''
+      } ${isHeading ? 'lt-block-heading' : ''} ${
         isFootnote ? 'lt-block-footnote' : ''
-      } ${isAlgorithm ? 'lt-block-algo' : ''} ${selected ? 'lt-block-selected' : ''} ${
-        movable ? 'lt-block-movable' : ''
-      }`}
+      } ${isAlgorithm ? 'lt-block-algo' : ''}`}
       style={{
-        left: `${left + dx}px`,
-        top: `${top + offsetY + dy}px`,
-        width: `${boxWidth}px`,
+        left: `${left}px`,
+        top: `${top}px`,
+        width: `${width}px`,
         minHeight: isHeader || isFootnote ? undefined : `${Math.round(height)}px`,
         fontSize: `${baseFontSize}px`,
         lineHeight: computedLineHeight,
         fontWeight: isHeading ? 700 : b.bold ? 650 : 400,
         textAlign: isFormula
           ? 'center'
-          : isAbstract
-            ? 'center'
-            : isHeading || isHeader || isFootnote || isAlgorithm
-              ? 'left'
-              : 'justify',
+          : isHeading || isHeader || isFootnote || isAlgorithm
+            ? 'left'
+            : 'justify',
         overflow: 'visible',
         opacity: isFormula ? 0 : 1,
         pointerEvents: isFormula ? 'none' : 'auto',
-        background: isFormula ? 'transparent' : undefined,
-        zIndex: selected ? 30 : 10 + Math.min(zOrder, 18),
-      }}
-      onClick={() => {
-        if (movable) onSelect(selected ? null : b.id);
+        background: 'transparent',
+        zIndex: 10,
       }}
     >
-      {movable && (
-        <span
-          class="lt-drag-handle"
-          title="Kéo để di chuyển component"
-          onPointerDown={startDrag}
-          onClick={(e) => e.stopPropagation()}
-        >
-          ⠿
-        </span>
-      )}
-      {movable && (
-        <span
-          class="lt-resize-handle"
-          title="Kéo để đổi rộng (chữ tự giãn dòng)"
-          onPointerDown={startResize}
-          onClick={(e) => e.stopPropagation()}
-        >
-          ◢
-        </span>
-      )}
-      {isFormula && isTranslated ? (
-        // Formula Keep-Out Zone: Transparent overlay lets canvas math vector show cleanly
+      {isFormula ? (
         <span style={{ opacity: 0 }}>{b.text}</span>
-      ) : isTranslated ? (
-        // Render sentences with inline hover tracking on translated text
-        sentenceItems.map((s) => {
-          const isActive = hoveredSentenceId === s.id;
-          const sText = s.translation || s.text;
-          return (
-            <span
-              key={s.id}
-              data-sentence-id={s.id}
-              class={`lt-sentence ${isActive ? 'lt-sentence-active' : ''}`}
-              onMouseEnter={() => onHoverSentence(s.id)}
-              onMouseLeave={() => onHoverSentence(null)}
-            >
-              {sText}{' '}
-            </span>
-          );
-        })
       ) : (
-        // Render transparent sentence overlays on original canvas text to detect hover
         sentenceItems.map((s) => {
           const isActive = hoveredSentenceId === s.id;
           return (

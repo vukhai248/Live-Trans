@@ -10,8 +10,21 @@ export interface PdfSnippetProps {
   scale?: number;
 }
 
-// Cached rendered PDF page canvases for ultra-fast snippet extraction
-const pdfPageCanvasCache = new Map<string, HTMLCanvasElement>();
+import {
+  getCachedCanvas,
+  setCachedCanvas,
+  clearCanvasCache,
+  MAX_CANVAS_CACHE_SIZE,
+  pdfPageCanvasCache,
+} from '@/lib/pdf/snippet-cache';
+
+export {
+  getCachedCanvas,
+  setCachedCanvas,
+  clearCanvasCache,
+  MAX_CANVAS_CACHE_SIZE,
+  pdfPageCanvasCache,
+};
 
 export function PdfSnippet({
   pdfDoc,
@@ -31,7 +44,7 @@ export function PdfSnippet({
         const renderScale = 2.0; // 2x HiDPI
         const cacheKey = `${(pdfDoc as any).fingerprint || 'doc'}_p${pageNumber}_s${renderScale}`;
 
-        let offCanvas = pdfPageCanvasCache.get(cacheKey);
+        let offCanvas = getCachedCanvas(cacheKey);
         if (!offCanvas) {
           const page = await pdfDoc.getPage(pageNumber);
           if (!active) return;
@@ -49,7 +62,7 @@ export function PdfSnippet({
           }).promise;
           if (!active) return;
 
-          pdfPageCanvasCache.set(cacheKey, offCanvas);
+          setCachedCanvas(cacheKey, offCanvas);
         }
 
         const targetCanvas = canvasRef.current;

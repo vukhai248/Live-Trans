@@ -2,6 +2,7 @@ import { browser } from 'wxt/browser';
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import { loadSettings, SETTINGS_KEY, type Settings } from '@/lib/settings';
 import type { SubtitleUnit } from '@/lib/subtitles/segmenter';
+import { debounce } from '@/lib/utils/debounce';
 
 export default defineContentScript({
   matches: ['<all_urls>'],
@@ -33,7 +34,8 @@ export default defineContentScript({
     };
 
     sendDetectedTitle();
-    const titleObserver = new MutationObserver(sendDetectedTitle);
+    const debouncedSendTitle = debounce(sendDetectedTitle, 400);
+    const titleObserver = new MutationObserver(debouncedSendTitle);
     titleObserver.observe(document.documentElement, { subtree: true, childList: true });
 
     browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -73,7 +75,7 @@ export default defineContentScript({
 });
 
 /** Best-effort title extraction across YouTube / Coursera / Udemy / generic. */
-export function detectVideoTitle(): string | undefined {
+function detectVideoTitle(): string | undefined {
   const candidates: (string | null | undefined)[] = [
     document.querySelector('h1.ytd-watch-metadata yt-formatted-string')?.textContent,
     document.querySelector('#title h1 yt-formatted-string')?.textContent,
@@ -287,7 +289,7 @@ class OverlayHost {
 }
 
 /** Detects if the current page is a PDF document or Arxiv paper */
-export function detectPdfPage(): string | null {
+function detectPdfPage(): string | null {
   const url = window.location.href;
 
   // 1. Arxiv abstract or PDF page
@@ -368,7 +370,7 @@ function mountTranslateButton(pdfUrl: string) {
   document.body.appendChild(btn);
 }
 
-export function initPdfTranslateButton() {
+function initPdfTranslateButton() {
   const tryMount = () => {
     const pdfUrl = detectPdfPage();
     if (pdfUrl) {
@@ -377,8 +379,9 @@ export function initPdfTranslateButton() {
   };
 
   tryMount();
-  // Check again when DOM mutations occur (e.g. SPAs, embeds)
-  const obs = new MutationObserver(tryMount);
+  // Check again when DOM mutations occur (e.g. SPAs, embeds) with 400ms debounce
+  const debouncedTryMount = debounce(tryMount, 400);
+  const obs = new MutationObserver(debouncedTryMount);
   obs.observe(document.documentElement, { childList: true, subtree: true });
 }
 

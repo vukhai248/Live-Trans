@@ -35,7 +35,7 @@ export function expectedSurface(term: GlossaryTerm): string {
   return term.term;
 }
 
-export function termExpectations(terms: GlossaryTerm[]): TermExpectation[] {
+function termExpectations(terms: GlossaryTerm[]): TermExpectation[] {
   return terms.map((term) => ({
     term,
     expected: expectedSurface(term),
@@ -48,7 +48,7 @@ function containsForm(text: string, needle: string): boolean {
   return text.includes(needle);
 }
 
-export function validatePlaceholderRoundtrip(
+function validatePlaceholderRoundtrip(
   translation: string,
   expectedCount: number,
 ): { ok: boolean; mismatch: string[] } {
@@ -70,7 +70,7 @@ export function validatePlaceholderRoundtrip(
 }
 
 export function validateTranslation(
-  source: string,
+  _source: string,
   translation: string,
   sourceTerms: GlossaryTerm[],
   expectedPlaceholderCount = 0,
@@ -99,7 +99,6 @@ export function validateTranslation(
     complaint = `Bản dịch vi phạm ràng buộc: ${complaintParts.join('; ')}. Hãy dịch lại và giữ nguyên văn các cụm giữ chỗ ⟦n⟧ cũng như các thuật ngữ đã cho.`;
   }
 
-  void source;
   return {
     ok,
     termSuccessRate,

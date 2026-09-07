@@ -1,17 +1,13 @@
 import { useEffect, useState } from 'preact/hooks';
 import { browser } from 'wxt/browser';
-import {
-  STARTER_GLOSSARY,
-  type GlossaryDoc,
-  type GlossaryTerm,
-  type TermType,
-} from '@/lib/glossary/types';
+import { GlossaryEditor } from '@/components/GlossaryEditor';
 import type { SessionState } from '@/lib/protocol/messages';
 import {
   clampChunk,
   DEFAULT_SETTINGS,
   loadSettings,
   saveSettings,
+  SETTINGS_KEY,
   type Settings,
 } from '@/lib/settings';
 import { testGeminiApiKey } from '@/lib/providers/direct-gemini';
@@ -62,11 +58,6 @@ export function App() {
   const [hasSubtitles, setHasSubtitles] = useState(false);
   const [elapsed, setElapsed] = useState(0);
 
-  // Form for new term in Glossary tab
-  const [newTerm, setNewTerm] = useState('');
-  const [newType, setNewType] = useState<TermType>('code');
-  const [newVi, setNewVi] = useState('');
-
   useEffect(() => {
     void refreshAll();
     void checkActiveTabMedia();
@@ -87,7 +78,20 @@ export function App() {
         .catch(() => {});
     }, 900);
 
-    return () => clearInterval(id);
+    const handleStorageChange = (
+      changes: Record<string, any>,
+      areaName: string,
+    ) => {
+      if (areaName === 'local' && SETTINGS_KEY in changes) {
+        void loadSettings().then(setSettings);
+      }
+    };
+    browser.storage.onChanged.addListener(handleStorageChange);
+
+    return () => {
+      clearInterval(id);
+      browser.storage.onChanged.removeListener(handleStorageChange);
+    };
   }, []);
 
   async function refreshAll(): Promise<void> {
@@ -305,34 +309,6 @@ export function App() {
     setTestStatus({ testing: true });
     const result = await testGeminiApiKey(settings.apiKey.trim());
     setTestStatus({ testing: false, result });
-  }
-
-  function addGlossaryTerm(): void {
-    if (!newTerm.trim()) return;
-    const term: GlossaryTerm = {
-      term: newTerm.trim(),
-      type: newType,
-      vi: newVi.trim() ? newVi.trim() : undefined,
-    };
-    const nextGlossary: GlossaryDoc = {
-      version: 1,
-      terms: [...settings.glossary.terms, term],
-    };
-    void patchSettings({ glossary: nextGlossary });
-    setNewTerm('');
-    setNewVi('');
-  }
-
-  function removeGlossaryTerm(index: number): void {
-    const nextGlossary: GlossaryDoc = {
-      version: 1,
-      terms: settings.glossary.terms.filter((_, i) => i !== index),
-    };
-    void patchSettings({ glossary: nextGlossary });
-  }
-
-  function loadSampleGlossary(): void {
-    void patchSettings({ glossary: STARTER_GLOSSARY });
   }
 
   const tsrPct = Math.round((state?.tsr ?? 1) * 100);
@@ -836,72 +812,11 @@ export function App() {
 
       {/* TAB 3: GLOSSARY */}
       {tab === 'glossary' && (
-        <div class="tab-content">
-          <div class="glossary-header">
-            <div class="section-title">Bảo toàn thuật ngữ ({settings.glossary.terms.length})</div>
-            <button class="text-link" onClick={loadSampleGlossary}>
-              Nạp bộ mẫu
-            </button>
-          </div>
-
-          {/* Quick Add Form */}
-          <div class="glossary-add-box">
-            <input
-              type="text"
-              placeholder="Thuật ngữ (vd: useEffect, npm run start...)"
-              value={newTerm}
-              onInput={(e) => setNewTerm((e.target as HTMLInputElement).value)}
-            />
-            <div class="glossary-row">
-              <select
-                value={newType}
-                onChange={(e) => setNewType((e.target as HTMLSelectElement).value as TermType)}
-              >
-                <option value="code">Mã nguồn (code)</option>
-                <option value="command">Lệnh shell (command)</option>
-                <option value="jargon">Thuật ngữ dịch (jargon)</option>
-                <option value="acronym">Từ viết tắt (acronym)</option>
-              </select>
-              <input
-                type="text"
-                placeholder={newType === 'jargon' ? 'Dịch là (vd: hạ gradient)' : 'Ghi chú (tuỳ chọn)'}
-                value={newVi}
-                onInput={(e) => setNewVi((e.target as HTMLInputElement).value)}
-              />
-            </div>
-            <button
-              class="ghost btn-add"
-              onClick={addGlossaryTerm}
-              disabled={!newTerm.trim()}
-            >
-              + Thêm thuật ngữ
-            </button>
-          </div>
-
-          {/* Term List */}
-          <div class="glossary-list">
-            {settings.glossary.terms.length === 0 ? (
-              <div class="empty-hint">Chưa có thuật ngữ nào. Hãy thêm thuật ngữ cần bảo toàn.</div>
-            ) : (
-              settings.glossary.terms.map((t, idx) => (
-                <div class="glossary-item" key={t.term + idx}>
-                  <div class="glossary-item-info">
-                    <span class="glossary-item-term">{t.term}</span>
-                    <span class={`type-tag type-${t.type}`}>{t.type}</span>
-                    {t.vi && <span class="glossary-item-vi">➔ {t.vi}</span>}
-                  </div>
-                  <button
-                    class="btn-delete"
-                    onClick={() => removeGlossaryTerm(idx)}
-                    title="Xóa thuật ngữ"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+        <GlossaryEditor
+          glossary={settings.glossary}
+          onChange={(next) => void patchSettings({ glossary: next })}
+          variant="compact"
+        />
       )}
 
       {/* Footer */}

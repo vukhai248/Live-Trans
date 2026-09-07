@@ -147,23 +147,26 @@ export class KeyRouter {
   }
 }
 
-function areKeyListsEqual(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  return a.every((val, idx) => val === b[idx]);
-}
+const routerRegistry = new Map<string, KeyRouter>();
 
-let globalRouter: KeyRouter | null = null;
-
-export function getKeyRouter(userKey?: string | string[]): KeyRouter {
+export function getKeyRouter(userKey?: string | string[], namespace = 'default'): KeyRouter {
   const inputKeys: string[] = Array.isArray(userKey)
     ? userKey.filter((k) => typeof k === 'string' && k.trim().length > 0)
     : userKey
     ? userKey.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean)
     : [];
 
-  if (globalRouter && areKeyListsEqual(globalRouter.getAllKeys(), inputKeys)) {
-    return globalRouter;
+  const cacheKey = `${namespace}:${inputKeys.join('|||')}`;
+  const existing = routerRegistry.get(cacheKey);
+  if (existing) {
+    return existing;
   }
-  globalRouter = new KeyRouter(inputKeys);
-  return globalRouter;
+
+  const router = new KeyRouter(inputKeys);
+  routerRegistry.set(cacheKey, router);
+  return router;
+}
+
+export function clearKeyRouters(): void {
+  routerRegistry.clear();
 }

@@ -1,4 +1,4 @@
-import type { Settings } from '../settings';
+import { getProviderKeys, type Settings } from '../settings';
 import type {
   ContextPair,
   Provider,
@@ -82,7 +82,7 @@ export class DirectGeminiProvider implements Provider {
     req: TranscribeRequest,
     settings: Settings,
   ): Promise<ReturnType<typeof parseTranscribeResult>> {
-    const router = getKeyRouter(settings.apiKey);
+    const router = getKeyRouter(getProviderKeys(settings, 'gemini'), 'gemini');
     const wavBase64 = pcmBase64ToWavBase64(req.pcmBase64);
 
     const body: Record<string, any> = {
@@ -118,7 +118,7 @@ export class DirectGeminiProvider implements Provider {
     settings: Settings,
     buildPrompt: (r: TranslateBatchRequest) => string,
   ): Promise<TranslateBatchResponse> {
-    const router = getKeyRouter(settings.apiKey);
+    const router = getKeyRouter(getProviderKeys(settings, 'gemini'), 'gemini');
     const url = `${BASE}/models/${FLASH_MODEL}:generateContent`;
     const body = {
       contents: [{ role: 'user', parts: [{ text: buildPrompt(req) }] }],
@@ -140,7 +140,7 @@ export class DirectGeminiProvider implements Provider {
   }
 
   async translateTitle(title: string, settings: Settings): Promise<string> {
-    const router = getKeyRouter(settings.apiKey);
+    const router = getKeyRouter(getProviderKeys(settings, 'gemini'), 'gemini');
     const url = `${BASE}/models/${FLASH_MODEL}:generateContent`;
     const prompt = `Dịch tiêu đề video sau sang tiếng Việt cho tự nhiên, giữ nguyên tên riêng, tên thương hiệu và mã/định danh. Chỉ trả về tiêu đề đã dịch, không giải thích.\n\nTiêu đề: ${title}`;
     const body = {
