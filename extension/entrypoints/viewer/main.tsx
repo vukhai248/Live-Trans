@@ -66,12 +66,39 @@ export function ViewerApp() {
 
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [errorMsg, setErrorMsg] = useState<string>('');
-  // Select provider/model là PENDING — chỉ có hiệu lực khi bấm Áp dụng.
-  // Trang chưa dịch dùng model mới, trang đã dịch giữ nguyên.
-  const [pendingProvider, setPendingProvider] = useState<PdfProvider>(DEFAULT_SETTINGS.pdfProvider);
-  const [pendingModel, setPendingModel] = useState<string>(DEFAULT_SETTINGS.pdfModel);
-  const [pendingConcurrency, setPendingConcurrency] = useState<number>(DEFAULT_SETTINGS.pdfConcurrency);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'appearance' | 'models' | 'performance'>('appearance');
+  const [showAutoSaveBadge, setShowAutoSaveBadge] = useState<boolean>(false);
+  const autoSaveTimerRef = useRef<any>(null);
+
+  const triggerAutoSaveBadge = useCallback(() => {
+    setShowAutoSaveBadge(true);
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      setShowAutoSaveBadge(false);
+    }, 1800);
+  }, []);
+
+  const updateSettingDirect = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
+    setSettings((prev) => {
+      const next = { ...prev, [key]: value };
+      void saveSettings(next);
+      return next;
+    });
+    triggerAutoSaveBadge();
+  }, [triggerAutoSaveBadge]);
+
+  useEffect(() => {
+    if (!isSettingsOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsSettingsOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isSettingsOpen]);
+
   const [keyItems, setKeyItems] = useState<ApiKeyItem[]>([]);
   const [newKeyProvider, setNewKeyProvider] = useState<PdfProvider>('gemini');
   const [newKeyText, setNewKeyText] = useState<string>('');
@@ -125,9 +152,6 @@ export function ViewerApp() {
         s.pdfModel = DEFAULT_PDF_MODEL[s.pdfProvider];
       }
       setSettings(s);
-      setPendingProvider(s.pdfProvider);
-      setPendingModel(s.pdfModel);
-      setPendingConcurrency(s.pdfConcurrency || 5);
       setKeyItems(s.apiKeys || []);
       setNewKeyProvider(s.pdfProvider);
 
@@ -210,8 +234,8 @@ export function ViewerApp() {
   const hasActiveKey = activeProviderKeys.length > 0;
 
   const modalProviderKeys = useMemo(() => {
-    return keyItems.filter((k) => k.provider === pendingProvider);
-  }, [keyItems, pendingProvider]);
+    return keyItems.filter((k) => k.provider === settings.pdfProvider);
+  }, [keyItems, settings.pdfProvider]);
 
   const handleAddKey = () => {
     const trimmed = newKeyText.trim();
@@ -226,12 +250,36 @@ export function ViewerApp() {
       key: trimmed,
       createdAt: Date.now(),
     };
-    setKeyItems((prev) => [...prev, newItem]);
+    const updatedKeys = [...keyItems, newItem];
+    setKeyItems(updatedKeys);
+    const geminiKeys = updatedKeys.filter((k) => k.provider === 'gemini').map((k) => k.key.trim());
+    const zenKeys = updatedKeys.filter((k) => k.provider === 'zen').map((k) => k.key.trim());
+    const next: Settings = {
+      ...settings,
+      apiKeys: updatedKeys,
+      apiKey: geminiKeys[0] || '',
+      zenApiKey: zenKeys[0] || '',
+    };
+    setSettings(next);
+    void saveSettings(next);
     setNewKeyText('');
+    triggerAutoSaveBadge();
   };
 
   const handleRemoveKey = (id: string) => {
-    setKeyItems((prev) => prev.filter((k) => k.id !== id));
+    const updatedKeys = keyItems.filter((k) => k.id !== id);
+    setKeyItems(updatedKeys);
+    const geminiKeys = updatedKeys.filter((k) => k.provider === 'gemini').map((k) => k.key.trim());
+    const zenKeys = updatedKeys.filter((k) => k.provider === 'zen').map((k) => k.key.trim());
+    const next: Settings = {
+      ...settings,
+      apiKeys: updatedKeys,
+      apiKey: geminiKeys[0] || '',
+      zenApiKey: zenKeys[0] || '',
+    };
+    setSettings(next);
+    void saveSettings(next);
+    triggerAutoSaveBadge();
   };
 
   // Giữ ref đồng bộ state để tránh stale closure trong vòng lặp queue
@@ -972,30 +1020,6 @@ export function ViewerApp() {
     void triggerPageTranslation(pageNumber, true);
   };
 
-  const applySettingsModal = () => {
-    const validModels = pendingProvider === 'zen' ? PDF_ZEN_MODELS : PDF_GEMINI_MODELS;
-    const pdfModel = (validModels as readonly string[]).includes(pendingModel)
-      ? pendingModel
-      : DEFAULT_PDF_MODEL[pendingProvider];
-    const geminiKeys = keyItems.filter((k) => k.provider === 'gemini').map((k) => k.key.trim());
-    const zenKeys = keyItems.filter((k) => k.provider === 'zen').map((k) => k.key.trim());
-    const next: Settings = {
-      ...settings,
-      pdfProvider: pendingProvider,
-      pdfModel,
-      pdfConcurrency: pendingConcurrency,
-      apiKeys: keyItems,
-      apiKey: geminiKeys[0] || '',
-      zenApiKey: zenKeys[0] || '',
-    };
-    setSettings(next);
-    setPendingModel(pdfModel);
-    void saveSettings(next);
-    setIsSettingsOpen(false);
-
-    // Mở popup hỏi người dùng muốn dịch lại trang hiện tại, toàn bộ tài liệu hay để sau
-    setIsPostSavePromptOpen(true);
-  };
 
   // Dịch lại toàn bộ các trang từ đầu với provider/model hiện tại.
   const retranslateAll = () => {
@@ -1313,220 +1337,530 @@ export function ViewerApp() {
         </div>
       </header>
 
-      {/* SETTINGS MODAL */}
+      {/* SETTINGS MODAL (2-COLUMN MODERN IDE STYLE & AUTO-SAVE) */}
       {isSettingsOpen && (
         <div class="lt-modal-backdrop" onClick={() => setIsSettingsOpen(false)}>
-          <div class="lt-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div class="lt-modal-header">
-              <div class="lt-modal-title">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <div class="lt-modal-card-modern" onClick={(e) => e.stopPropagation()}>
+            {/* SIDEBAR BÊN TRÁI */}
+            <aside class="lt-modal-sidebar">
+              <div class="lt-modal-sidebar-header">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
                   <circle cx="12" cy="12" r="3"/>
                 </svg>
                 <span>Cài đặt Live-Trans</span>
               </div>
-              <button
-                class="lt-modal-close-btn"
-                onClick={() => setIsSettingsOpen(false)}
-                title="Đóng"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18"/>
-                  <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-              </button>
-            </div>
 
-            <div class="lt-modal-body">
-              {/* Provider */}
-              <div class="lt-setting-field">
-                <label class="lt-setting-label">Nhà cung cấp AI (Provider)</label>
-                <div class="lt-setting-desc">
-                  Chọn Google Gemini chính thức hoặc OpenCode Zen (OpenAI-compatible)
+              <nav class="lt-sidebar-nav">
+                <button
+                  type="button"
+                  class={`lt-sidebar-nav-item ${activeSettingsTab === 'appearance' ? 'active' : ''}`}
+                  onClick={() => setActiveSettingsTab('appearance')}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/>
+                    <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
+                    <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>
+                    <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/>
+                    <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
+                  </svg>
+                  <span>Giao diện & Đọc</span>
+                </button>
+
+                <button
+                  type="button"
+                  class={`lt-sidebar-nav-item ${activeSettingsTab === 'models' ? 'active' : ''}`}
+                  onClick={() => setActiveSettingsTab('models')}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2 2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
+                    <path d="M4 11a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-7z"/>
+                    <path d="M9 16v1"/>
+                    <path d="M15 16v1"/>
+                  </svg>
+                  <span>Mô hình AI & API</span>
+                </button>
+
+                <button
+                  type="button"
+                  class={`lt-sidebar-nav-item ${activeSettingsTab === 'performance' ? 'active' : ''}`}
+                  onClick={() => setActiveSettingsTab('performance')}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                  </svg>
+                  <span>Hiệu năng & Bộ nhớ</span>
+                </button>
+              </nav>
+
+              <div style={{ marginTop: 'auto', padding: '12px 6px 4px 6px', borderTop: '1px solid #202024' }}>
+                <div style={{ fontSize: '11px', color: '#71717a', lineHeight: '1.4' }}>
+                  Live-Trans v1.1.0<br/>
+                  Tối ưu cho Paper PDF
                 </div>
-                <CustomSelect
-                  value={pendingProvider}
-                  options={[
-                    { value: 'gemini', label: 'Google Gemini (Mặc định, ổn định)', desc: 'Chính thức từ Google AI Studio, nhanh & nhiều quota' },
-                    { value: 'zen', label: 'OpenCode Zen (Dự phòng SOTA)', desc: 'OpenAI-compatible proxy, hỗ trợ đa model SOTA' },
-                  ]}
-                  onChange={(val) => {
-                    const p = val as PdfProvider;
-                    setPendingProvider(p);
-                    setPendingModel(DEFAULT_PDF_MODEL[p]);
-                  }}
-                />
               </div>
+            </aside>
 
-              {/* Model */}
-              <div class="lt-setting-field">
-                <label class="lt-setting-label">Mô hình AI (Model)</label>
-                <div class="lt-setting-desc">
-                  {pendingProvider === 'gemini'
-                    ? 'Khuyên dùng gemini-3.5-flash-lite để dịch nhanh, nhiều quota và mượt'
-                    : 'Các model mã nguồn mở hoặc thương mại hỗ trợ qua Zen API'}
-                </div>
-                <CustomSelect
-                  value={pendingModel}
-                  options={(pendingProvider === 'gemini' ? PDF_GEMINI_MODELS : PDF_ZEN_MODELS).map((m) => ({
-                    value: m,
-                    label: m,
-                  }))}
-                  onChange={(val) => setPendingModel(val as string)}
-                />
-              </div>
-
-              {/* QUẢN LÝ ĐA API KEY VỚI SMART ROUTER */}
-              <div class="lt-setting-field">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <label class="lt-setting-label" style={{ margin: 0 }}>Quản lý API Key (Đa khóa & Smart Router)</label>
-                  <span class="lt-key-count-badge">
-                    {modalProviderKeys.length} key {pendingProvider === 'gemini' ? 'Gemini' : 'Zen'}
-                  </span>
-                </div>
-                <div class="lt-setting-desc">
-                  Thêm một hoặc nhiều key để hệ thống tự động xoay tua (Router) khi gặp giới hạn hạn mức Rate Limit (429).
+            {/* KHUNG NỘI DUNG BÊN PHẢI */}
+            <main class="lt-modal-main-content">
+              {/* TOPBAR */}
+              <div class="lt-modal-content-topbar">
+                <div class="lt-modal-topbar-title">
+                  {activeSettingsTab === 'appearance' && '🎨 Tùy chỉnh Giao diện & Đọc'}
+                  {activeSettingsTab === 'models' && '🤖 Cấu hình Mô hình AI & Đa Khóa API'}
+                  {activeSettingsTab === 'performance' && '⚡ Hiệu năng Dịch & Quản lý Bộ nhớ'}
                 </div>
 
-                {/* Hàng thêm key: Dropdown chọn provider + Ô nhập key + Nút Thêm */}
-                <div class="lt-add-key-row">
-                  <CustomSelect
-                    className="lt-key-provider-select"
-                    value={newKeyProvider}
-                    options={[
-                      { value: 'gemini', label: 'Google Gemini' },
-                      { value: 'zen', label: 'OpenCode Zen' },
-                    ]}
-                    onChange={(val) => setNewKeyProvider(val as PdfProvider)}
-                  />
-                  <input
-                    type="password"
-                    class="lt-setting-input lt-key-input"
-                    placeholder={newKeyProvider === 'gemini' ? 'Nhập Gemini Key (AIzaSy...)' : 'Nhập Zen Key (sk-...)'}
-                    value={newKeyText}
-                    onInput={(e) => setNewKeyText((e.target as HTMLInputElement).value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddKey();
-                      }
-                    }}
-                  />
+                <div class="lt-modal-topbar-right">
+                  {showAutoSaveBadge && (
+                    <span class="lt-autosave-badge">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      Đã tự động lưu
+                    </span>
+                  )}
                   <button
-                    type="button"
-                    class="lt-btn lt-btn-primary lt-btn-add-key"
-                    onClick={handleAddKey}
-                    title="Thêm API Key này vào danh sách"
+                    class="lt-modal-close-btn"
+                    onClick={() => setIsSettingsOpen(false)}
+                    title="Đóng (Esc)"
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                      <line x1="12" y1="5" x2="12" y2="19"/>
-                      <line x1="5" y1="12" x2="12" y2="12"/>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"/>
+                      <line x1="6" y1="6" x2="18" y2="18"/>
                     </svg>
-                    <span>Thêm</span>
                   </button>
                 </div>
+              </div>
 
-                {/* Danh sách các key đã thêm */}
-                <div class="lt-keys-list">
-                  {keyItems.length === 0 ? (
-                    <div class="lt-keys-empty">Chưa có API key nào. Vui lòng thêm ít nhất 1 key ở trên để bắt đầu dịch.</div>
-                  ) : (
-                    keyItems.map((item, idx) => (
-                      <div key={item.id} class="lt-key-card">
-                        <div class="lt-key-card-left">
-                          <span class={`lt-key-badge lt-key-badge-${item.provider}`}>
-                            {item.provider === 'gemini' ? 'Gemini' : 'Zen'}
-                          </span>
-                          <span class="lt-key-masked">
-                            {maskApiKey(item.key)}
-                          </span>
-                          {idx === 0 && (
-                            <span class="lt-key-primary-tag">Mặc định</span>
-                          )}
+              {/* SCROLLABLE CONTENT */}
+              <div class="lt-modal-content-scroll">
+                {/* TAB 1: GIAO DIỆN & ĐỌC (LAYOUT 2 CỘT: CONTROLS TRÁI & LIVE PREVIEW PHẢI) */}
+                {activeSettingsTab === 'appearance' && (
+                  <div class="lt-appearance-split-layout">
+                    {/* CỘT TRÁI: CÁC NÚT ĐIỀU KHIỂN */}
+                    <div class="lt-appearance-controls-col">
+                      {/* Chủ đề & Màu nền (5 Themes) */}
+                      <div class="lt-settings-section-card">
+                        <div class="lt-section-card-title">Màu nền & Chủ đề bản dịch (Theme)</div>
+                        <div class="lt-section-card-desc">
+                          Chọn phong cách trang đọc bài báo phù hợp điều kiện ánh sáng. Tự động áp dụng tức thì.
                         </div>
+                        <div class="lt-theme-grid">
+                          {[
+                            { id: 'white', name: 'Trắng', previewClass: 'lt-preview-white' },
+                            { id: 'sepia', name: 'Giấy ngà', previewClass: 'lt-preview-sepia' },
+                            { id: 'dark', name: 'Tối êm', previewClass: 'lt-preview-dark' },
+                            { id: 'midnight', name: 'Đêm đen', previewClass: 'lt-preview-midnight' },
+                            { id: 'oceanic', name: 'Biển sâu', previewClass: 'lt-preview-oceanic' },
+                          ].map((t) => (
+                            <div
+                              key={t.id}
+                              class={`lt-theme-card ${(settings.viewerTheme || 'white') === t.id ? 'active' : ''}`}
+                              onClick={() => updateSettingDirect('viewerTheme', t.id as any)}
+                              title={t.name}
+                            >
+                              <div class={`lt-theme-card-preview ${t.previewClass}`}>
+                                <div class="lt-preview-line" style={{ width: '85%' }} />
+                                <div class="lt-preview-line" style={{ width: '60%' }} />
+                                <div class="lt-preview-line" style={{ width: '90%' }} />
+                              </div>
+                              <div class="lt-theme-card-title">{t.name}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Font chữ bản dịch (Dropdown Select - Chuẩn tiếng Việt 100%) */}
+                      <div class="lt-settings-section-card">
+                        <div class="lt-section-card-title">Font chữ bản dịch (Font Family)</div>
+                        <div class="lt-section-card-desc">
+                          Chọn kiểu chữ hiển thị cho toàn bộ văn bản và công thức. Hỗ trợ tiếng Việt tuyệt đối 100%.
+                        </div>
+                        <CustomSelect
+                          value={settings.viewerFontFamily || 'system'}
+                          options={[
+                            {
+                              value: 'system',
+                              label: 'Hệ thống (Mặc định - Sans-serif)',
+                              desc: 'Inter / Roboto / Segoe UI — Tối giản, hiện đại, tối ưu 100% tiếng Việt',
+                              fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+                            },
+                            {
+                              value: 'times',
+                              label: 'Times New Roman (Serif Học thuật)',
+                              desc: 'Chuẩn mực bài báo quốc tế (IEEE, Nature, ACM) — Rõ ràng, uy tín',
+                              fontFamily: "'Times New Roman', Times, serif",
+                            },
+                            {
+                              value: 'palatino',
+                              label: 'Palatino Linotype (Serif Cổ điển)',
+                              desc: 'Dáng chữ luận án & sách học thuật — Thanh lịch, trang nhã',
+                              fontFamily: "'Palatino Linotype', Palatino, 'Book Antiqua', serif",
+                            },
+                            {
+                              value: 'segoe',
+                              label: 'Segoe UI (Sans-serif Mượt mà)',
+                              desc: 'Chuẩn mực Fluent Design — Bo cong êm ái, dễ đọc trên màn hình',
+                              fontFamily: "'Segoe UI', Roboto, sans-serif",
+                            },
+                            {
+                              value: 'arial',
+                              label: 'Arial Clean (Sans-serif Tiêu chuẩn)',
+                              desc: 'Độ tương phản cao, chân phương, hiển thị sắc nét ở mọi độ phân giải',
+                              fontFamily: "Arial, Helvetica, sans-serif",
+                            },
+                          ]}
+                          onChange={(val) => {
+                            updateSettingDirect('viewerFontFamily', val as any);
+                          }}
+                        />
+                      </div>
+
+                      {/* Tỷ lệ thu phóng bản dịch (Content Scale) */}
+                      <div class="lt-settings-section-card">
+                        <div class="lt-section-card-title">Tỷ lệ thu phóng bản dịch (Content Scale)</div>
+                        <div class="lt-section-card-desc">
+                          Điều chỉnh độ phóng to/thu nhỏ toàn bộ tiêu đề, văn bản, công thức KaTeX và bảng biểu theo tỷ lệ chuẩn.
+                        </div>
+
+                        {/* Nút chọn nhanh */}
+                        <div class="lt-scale-pills">
+                          {[85, 90, 100, 115, 130, 150, 175].map((scale) => (
+                            <button
+                              key={scale}
+                              type="button"
+                              class={`lt-scale-btn ${(settings.viewerFontScale || 100) === scale ? 'active' : ''}`}
+                              onClick={() => {
+                                updateSettingDirect('viewerFontScale', scale);
+                                updateSettingDirect('viewerFontSize', Math.round(15 * (scale / 100)));
+                              }}
+                            >
+                              {scale}% {scale === 100 ? '(Chuẩn)' : ''}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Thanh kéo Slider & Hiển thị % */}
+                        <div class="lt-custom-scale-controls">
+                          <span style={{ fontSize: '11px', color: '#a1a1aa', flex: 'none' }}>75%</span>
+                          <input
+                            type="range"
+                            class="lt-scale-slider"
+                            min="75"
+                            max="180"
+                            step="1"
+                            value={settings.viewerFontScale || 100}
+                            onInput={(e) => {
+                              const val = Number((e.target as HTMLInputElement).value);
+                              updateSettingDirect('viewerFontScale', val);
+                              updateSettingDirect('viewerFontSize', Math.round(15 * (val / 100)));
+                            }}
+                          />
+                          <span style={{ fontSize: '11px', color: '#a1a1aa', flex: 'none' }}>180%</span>
+                          <div class="lt-scale-value-label">
+                            {settings.viewerFontScale || 100}%
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* CỘT PHẢI: KHUNG XEM TRƯỚC TRỰC TIẾP (LIVE DOCUMENT PREVIEW) */}
+                    <div class="lt-appearance-preview-col">
+                      <div class="lt-live-preview-header">
+                        <div class="lt-live-preview-header-title">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2">
+                            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                          </svg>
+                          Xem trước trực tiếp
+                        </div>
+                        <span class="lt-live-preview-tag">⚡ 0ms Real-time</span>
+                      </div>
+
+                      <div class="lt-live-preview-body-scroll">
+                        <div
+                          class={`lt-live-preview-paper-sheet lt-preview-theme-${settings.viewerTheme || 'white'}`}
+                          style={{
+                            zoom: `${(settings.viewerFontScale || 100) / 100}`,
+                            fontFamily: settings.viewerFontFamily === 'times'
+                              ? "'Times New Roman', Times, serif"
+                              : settings.viewerFontFamily === 'palatino'
+                              ? "'Palatino Linotype', Palatino, 'Book Antiqua', serif"
+                              : settings.viewerFontFamily === 'segoe'
+                              ? "'Segoe UI', Roboto, sans-serif"
+                              : settings.viewerFontFamily === 'arial'
+                              ? "Arial, 'Helvetica Neue', Helvetica, sans-serif"
+                              : "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+                          }}
+                        >
+                          <div class="lt-pv-h1">Universal Guidance for Diffusion Models</div>
+                          <div class="lt-pv-meta">A. Bansal, H.M. Chu, T. Goldstein — CVPR Conference</div>
+
+                          <div class="lt-pv-h2">Tóm tắt (Abstract)</div>
+                          <div class="lt-pv-p">
+                            Chúng tôi đề xuất một thuật toán <strong>hướng dẫn phổ quát</strong> cho phép điều khiển mô hình khuếch tán bằng bất kỳ hàm tổn thất nào mà không cần huấn luyện lại.
+                          </div>
+
+                          <div class="lt-pv-h2">1. Cơ sở lý thuyết & Công thức</div>
+                          <div class="lt-pv-p">
+                            Hàm gradient điểm số tại bước khuếch tán thời gian <em>t</em>:
+                          </div>
+                          <div class="lt-pv-eq">
+                            ∇_x log p_t(x) = (x_t - √α_t x_0) / (1 - α_t)  (1)
+                          </div>
+
+                          <table class="lt-pv-table">
+                            <thead>
+                              <tr>
+                                <th>Phương pháp</th>
+                                <th>FID (↓)</th>
+                                <th>CLIP (↑)</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr>
+                                <td>DDIM Baseline</td>
+                                <td>14.2</td>
+                                <td>0.26</td>
+                              </tr>
+                              <tr>
+                                <td><strong>Đề xuất (Ours)</strong></td>
+                                <td><strong>6.8</strong></td>
+                                <td><strong>0.37</strong></td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* TAB 2: MÔ HÌNH AI & API */}
+                {activeSettingsTab === 'models' && (
+                  <>
+                    {/* Nhà cung cấp & Model */}
+                    <div class="lt-settings-section-card">
+                      <div class="lt-section-card-title">Nhà cung cấp & Mô hình AI (Provider & Model)</div>
+                      <div class="lt-section-card-desc">
+                        Chọn mô hình dịch thuật. Thay đổi sẽ tự động áp dụng cho các trang kế tiếp ngay lập tức.
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <div>
+                          <label class="lt-setting-label">Nhà cung cấp (Provider)</label>
+                          <CustomSelect
+                            value={settings.pdfProvider}
+                            options={[
+                              { value: 'gemini', label: 'Google Gemini (Mặc định, ổn định)', desc: 'Chính thức từ Google AI Studio, nhanh & nhiều quota' },
+                              { value: 'zen', label: 'OpenCode Zen (Dự phòng SOTA)', desc: 'OpenAI-compatible proxy, hỗ trợ đa model SOTA' },
+                            ]}
+                            onChange={(val) => {
+                              const p = val as PdfProvider;
+                              const defaultModel = DEFAULT_PDF_MODEL[p];
+                              setSettings((prev) => {
+                                const next = { ...prev, pdfProvider: p, pdfModel: defaultModel };
+                                void saveSettings(next);
+                                return next;
+                              });
+                              triggerAutoSaveBadge();
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <label class="lt-setting-label">Mô hình AI (Model)</label>
+                          <CustomSelect
+                            value={settings.pdfModel}
+                            options={(settings.pdfProvider === 'gemini' ? PDF_GEMINI_MODELS : PDF_ZEN_MODELS).map((m) => ({
+                              value: m,
+                              label: m,
+                              desc: m === 'gemini-3.5-flash-lite' ? 'Khuyên dùng: Dịch cực nhanh, nhẹ & hạn mức lớn' : undefined,
+                            }))}
+                            onChange={(val) => {
+                              updateSettingDirect('pdfModel', val as string);
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Quản lý Đa API Key */}
+                    <div class="lt-settings-section-card">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div class="lt-section-card-title">Quản lý API Key (Đa khóa & Smart Router)</div>
+                        <span class="lt-key-count-badge">
+                          {modalProviderKeys.length} key {settings.pdfProvider === 'gemini' ? 'Gemini' : 'Zen'}
+                        </span>
+                      </div>
+                      <div class="lt-section-card-desc">
+                        Thêm một hoặc nhiều key để hệ thống tự động xoay tua (Router) khi gặp giới hạn hạn mức Rate Limit (429).
+                      </div>
+
+                      <div class="lt-add-key-row">
+                        <CustomSelect
+                          className="lt-key-provider-select"
+                          value={newKeyProvider}
+                          options={[
+                            { value: 'gemini', label: 'Google Gemini' },
+                            { value: 'zen', label: 'OpenCode Zen' },
+                          ]}
+                          onChange={(val) => setNewKeyProvider(val as PdfProvider)}
+                        />
+                        <input
+                          type="password"
+                          class="lt-setting-input lt-key-input"
+                          placeholder={newKeyProvider === 'gemini' ? 'Nhập Gemini Key (AIzaSy...)' : 'Nhập Zen Key (sk-...)'}
+                          value={newKeyText}
+                          onInput={(e) => setNewKeyText((e.target as HTMLInputElement).value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddKey();
+                            }
+                          }}
+                        />
                         <button
                           type="button"
-                          class="lt-key-del-btn"
-                          title="Xóa key này"
-                          onClick={() => handleRemoveKey(item.id)}
+                          class="lt-btn lt-btn-primary lt-btn-add-key"
+                          onClick={handleAddKey}
+                          title="Thêm API Key này vào danh sách"
                         >
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="3 6 5 6 21 6"/>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <line x1="12" y1="5" x2="12" y2="19"/>
+                            <line x1="5" y1="12" x2="12" y2="12"/>
                           </svg>
+                          <span>Thêm</span>
                         </button>
                       </div>
-                    ))
-                  )}
-                </div>
 
-                {/* Trạng thái Router tương ứng với provider đang chọn */}
-                <div class="lt-router-status-note">
-                  {modalProviderKeys.length >= 2 ? (
-                    <div class="lt-router-alert lt-router-active">
-                      🟢 <strong>Đang kích hoạt Smart Router ({modalProviderKeys.length} keys):</strong> Tự động xoay vòng sang key kế tiếp khi một key bị limit (429/quota).
+                      {/* Danh sách các key đã thêm */}
+                      <div class="lt-keys-list">
+                        {keyItems.length === 0 ? (
+                          <div class="lt-keys-empty">Chưa có API key nào. Vui lòng thêm ít nhất 1 key ở trên để bắt đầu dịch.</div>
+                        ) : (
+                          keyItems.map((item, idx) => (
+                            <div key={item.id} class="lt-key-card">
+                              <div class="lt-key-card-left">
+                                <span class={`lt-key-badge lt-key-badge-${item.provider}`}>
+                                  {item.provider === 'gemini' ? 'Gemini' : 'Zen'}
+                                </span>
+                                <span class="lt-key-masked">
+                                  {maskApiKey(item.key)}
+                                </span>
+                                {idx === 0 && (
+                                  <span class="lt-key-primary-tag">Mặc định</span>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                class="lt-key-del-btn"
+                                title="Xóa key này"
+                                onClick={() => handleRemoveKey(item.id)}
+                              >
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                  <polyline points="3 6 5 6 21 6"/>
+                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                </svg>
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      {/* Trạng thái Router tương ứng với provider đang chọn */}
+                      <div class="lt-router-status-note">
+                        {modalProviderKeys.length >= 2 ? (
+                          <div class="lt-router-alert lt-router-active">
+                            🟢 <strong>Đang kích hoạt Smart Router ({modalProviderKeys.length} keys):</strong> Tự động xoay vòng sang key kế tiếp khi một key bị limit (429/quota).
+                          </div>
+                        ) : modalProviderKeys.length === 1 ? (
+                          <div class="lt-router-alert lt-router-single">
+                            ℹ️ <strong>Sử dụng 1 key đơn lẻ:</strong> Khi chạm hạn mức (429/quota), hệ thống sẽ thông báo lỗi trực tiếp thay vì xoay vòng.
+                          </div>
+                        ) : (
+                          <div class="lt-router-alert lt-router-empty">
+                            ⚠️ <strong>Chưa có API key:</strong> Cần thêm ít nhất 1 key cho {settings.pdfProvider === 'gemini' ? 'Google Gemini' : 'OpenCode Zen'} để sử dụng tính năng dịch.
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  ) : modalProviderKeys.length === 1 ? (
-                    <div class="lt-router-alert lt-router-single">
-                      ℹ️ <strong>Sử dụng 1 key đơn lẻ:</strong> Khi chạm hạn mức (429/quota), hệ thống sẽ thông báo lỗi trực tiếp thay vì xoay vòng.
+                  </>
+                )}
+
+                {/* TAB 3: HIỆU NĂNG & BỘ NHỚ */}
+                {activeSettingsTab === 'performance' && (
+                  <>
+                    {/* Số trang dịch song song */}
+                    <div class="lt-settings-section-card">
+                      <div class="lt-section-card-title">Số trang dịch song song (Multi-Worker Concurrency)</div>
+                      <div class="lt-section-card-desc">
+                        Số worker dịch đồng thời theo hàng đợi thác nước. Khuyên dùng 5 trang để đọc nhanh mà không nghẽn mạng.
+                      </div>
+                      <CustomSelect
+                        value={settings.pdfConcurrency || 5}
+                        options={[
+                          { value: 2, label: '2 trang song song' },
+                          { value: 3, label: '3 trang song song' },
+                          { value: 4, label: '4 trang song song' },
+                          { value: 5, label: '5 trang song song (Mặc định, tối ưu)' },
+                          { value: 6, label: '6 trang song song' },
+                          { value: 7, label: '7 trang song song (Tối đa)' },
+                        ]}
+                        onChange={(val) => updateSettingDirect('pdfConcurrency', Number(val))}
+                      />
                     </div>
-                  ) : (
-                    <div class="lt-router-alert lt-router-empty">
-                      ⚠️ <strong>Chưa có API key:</strong> Cần thêm ít nhất 1 key cho {pendingProvider === 'gemini' ? 'Google Gemini' : 'OpenCode Zen'} để sử dụng tính năng dịch.
+
+                    {/* Ngôn ngữ đích */}
+                    <div class="lt-settings-section-card">
+                      <div class="lt-section-card-title">Ngôn ngữ đích (Target Language)</div>
+                      <div class="lt-section-card-desc">
+                        Ngôn ngữ kết quả sau khi dịch tài liệu (mặc định Tiếng Việt).
+                      </div>
+                      <CustomSelect
+                        value={settings.targetLang || 'vi'}
+                        options={[
+                          { value: 'vi', label: 'Tiếng Việt (Mặc định)' },
+                          { value: 'en', label: 'English (Tiếng Anh)' },
+                          { value: 'ja', label: '日本語 (Tiếng Nhật)' },
+                          { value: 'zh', label: '中文 (Tiếng Trung)' },
+                          { value: 'ko', label: '한국어 (Tiếng Hàn)' },
+                          { value: 'fr', label: 'Français (Tiếng Pháp)' },
+                          { value: 'de', label: 'Deutsch (Tiếng Đức)' },
+                        ]}
+                        onChange={(val) => updateSettingDirect('targetLang', val as string)}
+                      />
                     </div>
-                  )}
-                </div>
-              </div>
 
-              {/* Tùy chọn số luồng dịch song song (Concurrency) */}
-              <div class="lt-setting-field">
-                <label class="lt-setting-label">Số trang dịch song song (Concurrency)</label>
-                <div class="lt-setting-desc">
-                  Số worker dịch đồng thời theo hàng đợi thác nước. Khuyên dùng 5 trang để đọc nhanh mà không nghẽn mạng.
-                </div>
-                <CustomSelect
-                  value={pendingConcurrency}
-                  options={[
-                    { value: 2, label: '2 trang song song' },
-                    { value: 3, label: '3 trang song song' },
-                    { value: 4, label: '4 trang song song' },
-                    { value: 5, label: '5 trang song song (Mặc định, tối ưu)' },
-                    { value: 6, label: '6 trang song song' },
-                    { value: 7, label: '7 trang song song (Tối đa)' },
-                  ]}
-                  onChange={(val) => setPendingConcurrency(Number(val))}
-                />
+                    {/* Bộ nhớ đệm thông minh & Dịch lại */}
+                    <div class="lt-settings-section-card">
+                      <div class="lt-section-card-title">Bộ nhớ đệm thông minh (LRU Cache)</div>
+                      <div class="lt-section-card-desc">
+                        ⚡ Hệ thống tự động lưu trữ bền vững kết quả tối đa 50 bài báo trong 14 ngày. Khi mở lại bài báo, toàn bộ các trang đã dịch sẽ hiển thị tức thì 0ms.
+                      </div>
+                      <div style={{ marginTop: '6px' }}>
+                        <button
+                          type="button"
+                          class="lt-btn"
+                          style={{ width: '100%', justifyContent: 'center', padding: '9px 16px' }}
+                          onClick={() => {
+                            retranslateAll();
+                            setIsSettingsOpen(false);
+                          }}
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
+                            <path d="M21 3v5h-5"/>
+                          </svg>
+                          <span>↻ Xóa cache & Dịch lại toàn bộ các trang</span>
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
-
-              {/* Reset Layouts & Caches in settings */}
-              <div class="lt-setting-field" style={{ borderTop: '1px solid #27272a', paddingTop: '14px' }}>
-                <label class="lt-setting-label">Bố cục & Bộ nhớ tạm</label>
-                <div style={{ fontSize: '11px', color: '#a1a1aa', marginBottom: '8px', lineHeight: '1.4' }}>
-                  ⚡ <strong>Bộ nhớ đệm thông minh:</strong> Lưu trữ bền vững tối đa 50 bài báo trong 14 ngày (LRU). Tự động nạp tức thì 0ms khi mở lại trang hoặc khởi động lại Chrome.
-                </div>
-                <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                  <button
-                    class="lt-btn"
-                    style={{ flex: 1 }}
-                    onClick={() => {
-                      retranslateAll();
-                      setIsSettingsOpen(false);
-                    }}
-                  >
-                    ↻ Xóa cache & Dịch lại
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div class="lt-modal-footer">
-              <button class="lt-btn" onClick={() => setIsSettingsOpen(false)}>
-                Hủy
-              </button>
-              <button class="lt-btn lt-btn-primary" onClick={applySettingsModal}>
-                Lưu & Áp dụng
-              </button>
-            </div>
+            </main>
           </div>
         </div>
       )}
@@ -1822,12 +2156,14 @@ export function ViewerApp() {
           {(viewMode === 'bilingual' || viewMode === 'translated') && (
             <div
               ref={rightPaneRef}
-              class="lt-pane lt-pane-right"
+              class={`lt-pane lt-pane-right lt-theme-${settings.viewerTheme || 'white'} lt-font-${settings.viewerFontFamily || 'system'}`}
               onScroll={handleRightScroll}
               style={{
                 width: viewMode === 'bilingual' ? `${(1 - splitRatio) * 100}%` : '100%',
                 flex: 'none',
-              }}
+                '--lt-content-scale': `${(settings.viewerFontScale || 100) / 100}`,
+                '--lt-viewer-font-size': `${settings.viewerFontSize || 15}px`,
+              } as any}
             >
               {Array.from({ length: numPages }).map((_, idx) => {
                 const pno = idx + 1;

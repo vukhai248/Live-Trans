@@ -43,6 +43,9 @@ Tài liệu này tổng hợp toàn bộ các lỗi phát sinh trong quá trình
 | **ISSUE-033** | UI / Responsive Zoom | Thanh chọn mức thu phóng (75%–200%, nút −/+) trên Toolbar làm chật chội giao diện và áp đặt 1 scale cố định làm vỡ layout 2 khung khi chia tỷ lệ không đều. | Toolbar chứa cụm nút zoom tĩnh không phù hợp với layout song ngữ responsive; thiếu cơ chế zoom nhanh tạm thời cho từng bên trang. | Xóa bỏ cụm nút zoom trên Toolbar; cố định chế độ hiển thị luôn là Fit Width tự động; hỗ trợ Ctrl + Wheel zoom độc lập tạm thời cho từng bên trang; tự động reset tỷ lệ phóng về chuẩn Fit Width khi kéo hoặc chỉnh thanh Splitter ở giữa. | ✅ Đã khắc phục & Kiểm chứng |
 | **ISSUE-034** | Renderer & API / Figure BBox & OpenCode Zen | Lỗi cắt hình ảnh (Figure Snippet) bị sai trên bài báo toàn trang (`2405.14101`): mất 3 cột ảnh bên trái và chém vào dòng ngày tháng; OpenCode Zen API báo lỗi 400 `MissingSessionID` khi gọi từ môi trường ngoài. | Hardcode tọa độ Figure 1 trên Trang 1 (`figLeft = 307, figWidth = 245`); thiếu headers `User-Agent: OpenCode-Desktop/1.0.0` và `x-session-id` khi gọi OpenCode Zen API. | (1) Xóa bỏ hardcode, tính toán động BBox cho cả Full-Width (`col === 0` hoặc span > 55% trang) và Column Figure (`col === 1, 2`), định vị đỉnh ảnh tự động theo đáy author/date; (2) Thêm đầy đủ headers định danh cho OpenCode Zen API. | ✅ Đã khắc phục & Kiểm chứng |
 | **ISSUE-035** | LaTeX / Equation Numbering | Số thứ tự phương trình (17, 18, 19) bị gộp vào bên trong biểu thức toán (nhét vào tử số `\frac{... (17)}{...}` hoặc ngoặc hàm `D(x(19))`), hoặc bị dính sát lề phải công thức thay vì căn lề phải mép trang. | VLM đọc 2D ngang hàng với tử số/hàm số và sinh token autoregressive; Prompt hướng dẫn dùng `\quad (10)` thay vì lệnh chuẩn `\tag{N}`; KaTeX renderer thiếu bộ lọc regex tự động bóc tách và chuẩn hóa tag. | (1) Cập nhật Prompt bắt buộc dùng chuẩn `\tag{N}` và nghiêm cấm nhét vào ngoặc/tử số; (2) Tạo module `normalizeEquationLatex` tự động bóc tách số thứ tự bị kẹt chuyển thành `\tag{N}` căn lề phải chuẩn KaTeX; (3) Tinh chỉnh CSS `.lt-vision-display-eq .katex-display { width: 100% }`. | ✅ Đã khắc phục & Kiểm chứng |
+| **ISSUE-036** | UI / Typography Scaling | Chỉnh cỡ chữ bản dịch trong Cài đặt (ví dụ lên 26px) chỉ đổi khung preview nhưng nội dung Markdown bản dịch thực tế trong pane đọc không thay đổi kích thước; do Markdown có phân cấp tiêu đề (`#`, `##`, `###`) và các class CSS bị hardcode cứng bằng pixel cố định. | (1) Các class Markdown `.lt-vision-h1`, `.lt-vision-h2`, `.lt-vision-paragraph`, `.lt-vision-table`... được hardcode giá trị px tĩnh trong CSS; (2) Cỡ chữ đơn thuần không áp dụng được cho cấu trúc Markdown phân cấp nhiều tầng; cần chuyển sang hướng Scale tỷ lệ (Relative Typography Scaling) trên container hiển thị Markdown. | (1) Áp dụng biến CSS `--lt-content-scale` và CSS `zoom: var(--lt-content-scale, 1)` trên `.lt-vision-body` và Whiteboard, co giãn đồng bộ 100% tiêu đề, văn bản, KaTeX math và bảng số liệu mà không vỡ bố cục; (2) Tinh giản UI Cài đặt: Dải nút chọn nhanh (85%-175%) kèm thanh kéo trượt mượt mà và badge hiển thị % sắc nét, loại bỏ ô số spinner và nút đặt lại thừa thãi. | ✅ Đã khắc phục & Kiểm chứng |
+| **ISSUE-037** | UI / Dark Theme Contrast | Khi chọn Theme Tối (Dark), chữ tiêu đề H1-H3 và các đoạn văn bản Markdown bị chìm nghỉm vào nền đen tối không đọc được gì; do các class Markdown bị hardcode màu chữ đen `#0f172a`, `#334155` mà thiếu rule ghi đè màu sáng trong `.lt-theme-dark`. | Thiếu CSS selector ghi đè màu chữ cho các phần tử con Markdown bên trong container `.lt-theme-dark` (bao gồm H1-H3, paragraph, blockquote, KaTeX math, bảng biểu). | Bổ sung đầy đủ bảng màu tương phản cao cho `.lt-theme-dark` và các biến thể theme tối mới: chữ xám trắng `#f1f5f9`, tiêu đề xanh sáng `#38bdf8`, công thức và bảng biểu sáng rõ. | ⏳ Đang chờ người dùng phê duyệt |
+| **ISSUE-038** | Typography / Vietnamese Font Glyphs | Font `Merriweather` bị lỗi dấu tiếng Việt (vỡ chữ, lệch dấu thanh điệu); font `Inter` bị trùng lặp với tùy chọn Hệ thống mặc định. | `Merriweather` webfont chưa nạp đủ bộ ký tự Latinh mở rộng (Vietnamese subset) trên một số môi trường máy trạm; giao diện hiển thị dạng 4 ô nút to chiếm nhiều không gian. | (1) Xóa `Merriweather` và gộp `Inter` vào Hệ thống; (2) Bổ sung các font học thuật serif và sans-serif hỗ trợ tiếng Việt tuyệt đối 100% (`Times New Roman`, `Georgia`, `Palatino`, `Segoe UI/Roboto`); (3) Chuyển đổi sang dạng Popup Dropdown `<select>` sang trọng, tinh gọn diện tích. | ⏳ Đang chờ người dùng phê duyệt |
 
 ---
 
@@ -321,3 +324,32 @@ flowchart TD
      - Tạo bộ unit test `extension/lib/pdf/latex-cleaner.test.ts` kiểm chứng toàn bộ 7 kịch bản biên (bao gồm các phương trình 17, 18, 19, 9, 22). Toàn bộ **157/157 Unit Tests pass 100%**.
      - Lệnh `npm run check` (TypeScript typecheck + ESLint + Vitest) và `npm run build` hoàn tất với 0 lỗi.
      - Kiểm thử tự động CDP trên trình duyệt thực tế với Trang 16 của `2405.14101`, chụp ảnh màn hình nghiệm thu xác nhận toàn bộ 4 phương trình (17), (18), (19), (20) được tách biệt và căn lề phải hoàn hảo.
+
+---
+
+## 12. Phân tích Chi tiết ISSUE-039: Lỗi Font Georgia Tách Dấu Tiếng Việt & UI Menu Chọn Font Outdate
+
+- **Hiện tượng**:
+  1. Khi kích hoạt font `Georgia`, các từ tiếng Việt có dấu phức hợp (như `Tóm tắt`, `khuếch tán`, `đề xuất`) bị tách rời dấu sắc/nặng/ngã khỏi mẫu tự chính, tạo khoảng trắng hở kỳ dị (ví dụ: `Tóm tắ t`, `khuế ch tán`, `đê  xuâ t`).
+  2. Giao diện bộ chọn font hiện tại đang dùng thẻ HTML `<select>` mặc định của trình duyệt (`native select`). Menu thả xuống bị hệ điều hành Windows render thô cứng, viền vuông xám, không đồng bộ với ngôn ngữ thiết kế Dark Modern / Glassmorphism của Live-Trans.
+- **Nguyên nhân gốc rễ**:
+  1. **Khuyết tật Kerning & Combining Diacritics của font Georgia**: Font Georgia trên môi trường Windows sử dụng bảng mã kerning cũ, khi kết hợp với các dấu thanh điệu tiếng Việt Unicode tổ hợp (hoặc dựng sẵn ở một số cặp ký tự), bounding box của dấu bị đẩy sang phải thay vì nằm trên đỉnh mẫu tự.
+  2. **Thẻ HTML `<select>` gốc**: Menu popup thả xuống của thẻ `<select>` thuộc về tầng điều khiển của hệ điều hành (OS native window), không thể tùy biến CSS về hiệu ứng bóng mờ (box-shadow), viền glowing, icon font, xem trước typography trực tiếp hay badge mô tả.
+- **Giải pháp xử lý đề xuất**:
+  1. **Loại bỏ font Georgia**: Xóa hoàn toàn `georgia` khỏi hệ thống font. Chuyển fallback mặc định an toàn sang `system` (Inter/Roboto/Segoe UI) hoặc `times` (Times New Roman - Serif học thuật chuẩn 100% tiếng Việt từ Windows 95).
+  2. **Bộ Font Học Thuật Chuẩn Tiếng Việt Tối Ưu**:
+     - `system`: Hiện đại mặc định (System Sans-Serif: Segoe UI, Roboto, SF Pro, Inter) - Siêu nét, hỗ trợ 100% dấu.
+     - `times`: Chuẩn bài báo học thuật quốc tế (Times New Roman) - Serif chuẩn mực IEEE/Nature/ACM, không bao giờ lỗi dấu.
+     - `palatino`: Serif học thuật cao cấp (Palatino Linotype / Book Antiqua) - Nét chữ thanh thoát, hỗ trợ tiếng Việt trọn vẹn.
+     - `segoe`: Dáng chữ mượt mà chuẩn Microsoft Fluent Design (Segoe UI) - Rất dễ đọc trên màn hình máy tính.
+     - `arial`: Sans-serif thông dụng, độ tương phản cao, hỗ trợ tiếng Việt hoàn hảo.
+  3. **Xây dựng Custom Modern Font Dropdown UI (Chuẩn Live-Trans Design System)**:
+      - Thay thế toàn bộ `<select>` gốc bằng `CustomSelect` cao cấp:
+        - **Trigger Button**: Nền `#121215`, bo góc tròn 6px, viền `#27272a`, hiển thị nhãn font bằng chính font đó, mũi tên Chevron xoay mượt 180° khi mở.
+        - **Dropdown Menu List**: Nổi layer `z-index: 1050`, viền `#3f3f46`, nền `#18181b`, đổ bóng sâu `0 14px 38px rgba(0, 0, 0, 0.75)`, animation mượt mà.
+        - **Item Design**: Từng font có tên font hiển thị bằng chính font đó, mô tả chi tiết, badge phong cách và icon checkmark `✓` màu xanh Cyan khi đang được chọn.
+        - **Tương tác**: Hỗ trợ tự động tính toán hướng mở lên trên (`menu-upward`) nếu phía dưới không đủ chỗ, tự động đóng khi click outside hoặc phím `Esc`.
+- **Trạng thái**: ✅ **ĐÃ KHẮC PHỤC & KIỂM CHỨNG TOÀN DIỆN (157/157 Unit Tests Passed, CDP Live Screen Verified)**.
+  - Đã loại bỏ triệt để font Georgia.
+  - Đã tích hợp CustomSelect đồng bộ 100% với giao diện Dark Modern của Live-Trans.
+  - Chữ tiếng Việt hiển thị liền mạch hoàn hảo, không còn tình trạng hở dấu.

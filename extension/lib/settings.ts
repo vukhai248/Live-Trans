@@ -19,6 +19,9 @@ export const DEFAULT_PDF_MODEL: Record<PdfProvider, string> = {
   zen: 'muse-spark-1.2-contributor-free',
 };
 
+export type ViewerFontFamily = 'system' | 'times' | 'palatino' | 'segoe' | 'arial';
+export type ViewerTheme = 'white' | 'sepia' | 'dark' | 'midnight' | 'oceanic';
+
 export interface ApiKeyItem {
   id: string;
   provider: PdfProvider;
@@ -54,6 +57,14 @@ export interface Settings {
   zenApiKey: string;
   /** Số trang PDF dịch song song cùng lúc (Worker pool concurrency: 2-7, mặc định 5). */
   pdfConcurrency: number;
+  /** Kiểu font chữ hiển thị bản dịch paper */
+  viewerFontFamily?: ViewerFontFamily;
+  /** Cỡ chữ hiển thị bản dịch paper (px: 13-19, mặc định 15) - giữ tương thích ngược */
+  viewerFontSize?: number;
+  /** Tỷ lệ thu phóng nội dung hiển thị bản dịch paper (%: 75-180, mặc định 100) */
+  viewerFontScale?: number;
+  /** Màu nền và chủ đề hiển thị bản dịch paper: white | sepia | dark */
+  viewerTheme?: ViewerTheme;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -72,6 +83,10 @@ export const DEFAULT_SETTINGS: Settings = {
   pdfModel: DEFAULT_PDF_MODEL.gemini,
   zenApiKey: '',
   pdfConcurrency: 5,
+  viewerFontFamily: 'system',
+  viewerFontSize: 15,
+  viewerFontScale: 100,
+  viewerTheme: 'white',
 };
 
 export function clampChunk(seconds: number): number {
@@ -140,6 +155,27 @@ export async function loadSettings(): Promise<Settings> {
       apiKeys,
       chunkSeconds: clampChunk(raw?.chunkSeconds ?? 45),
       pdfConcurrency: Math.min(7, Math.max(2, raw?.pdfConcurrency ?? 5)),
+      viewerFontFamily: (() => {
+        const font = (raw as Record<string, unknown> | undefined)?.viewerFontFamily;
+        if (font === 'inter' || font === 'georgia' || font === 'merriweather') return 'system';
+        if (typeof font === 'string' && ['system', 'times', 'palatino', 'segoe', 'arial'].includes(font)) {
+          return font as ViewerFontFamily;
+        }
+        return 'system';
+      })(),
+      viewerFontSize: typeof raw?.viewerFontSize === 'number' ? raw.viewerFontSize : 15,
+      viewerFontScale: typeof raw?.viewerFontScale === 'number'
+        ? raw.viewerFontScale
+        : typeof raw?.viewerFontSize === 'number'
+          ? Math.round((raw.viewerFontSize / 15) * 100)
+          : 100,
+      viewerTheme: (() => {
+        const theme = (raw as Record<string, unknown> | undefined)?.viewerTheme;
+        if (typeof theme === 'string' && ['white', 'sepia', 'dark', 'midnight', 'oceanic'].includes(theme)) {
+          return theme as ViewerTheme;
+        }
+        return 'white';
+      })(),
     };
   } catch {
     return DEFAULT_SETTINGS;

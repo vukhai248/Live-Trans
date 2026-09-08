@@ -5,6 +5,7 @@ export interface CustomSelectOption<T> {
   label: string;
   desc?: string;
   badge?: string;
+  fontFamily?: string;
 }
 
 export interface CustomSelectProps<T> {
@@ -75,7 +76,10 @@ export function CustomSelect<T extends string | number>({
         aria-haspopup="listbox"
         aria-expanded={isOpen}
       >
-        <span class="lt-custom-select-label">
+        <span
+          class="lt-custom-select-label"
+          style={selectedOption?.fontFamily ? { fontFamily: selectedOption.fontFamily } : undefined}
+        >
           {selectedOption ? selectedOption.label : placeholder || 'Chọn...'}
         </span>
         <svg
@@ -110,7 +114,10 @@ export function CustomSelect<T extends string | number>({
                 }}
               >
                 <div class="lt-custom-select-item-content">
-                  <div class="lt-custom-select-item-label">
+                  <div
+                    class="lt-custom-select-item-label"
+                    style={opt.fontFamily ? { fontFamily: opt.fontFamily } : undefined}
+                  >
                     {opt.badge && (
                       <span class={`lt-key-badge lt-key-badge-${opt.badge}`}>
                         {opt.badge}
@@ -119,7 +126,12 @@ export function CustomSelect<T extends string | number>({
                     <span>{opt.label}</span>
                   </div>
                   {opt.desc && (
-                    <div class="lt-custom-select-item-desc">{opt.desc}</div>
+                    <div
+                      class="lt-custom-select-item-desc"
+                      style={opt.fontFamily ? { fontFamily: opt.fontFamily } : undefined}
+                    >
+                      {opt.desc}
+                    </div>
                   )}
                 </div>
                 {isSelected && (
