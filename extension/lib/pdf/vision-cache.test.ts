@@ -5,6 +5,8 @@ import {
   clearCachedVisionTranslation,
   clearAllVisionCache,
   getVisionCacheStats,
+  isTranslatedToTargetLanguage,
+  detectEnglishInMarkdown,
 } from './vision-translate';
 
 class MockStorage implements Storage {
@@ -175,5 +177,63 @@ describe('Smart Persistent Vision Cache (50 papers LRU & 14-day TTL)', () => {
 
     expect(getCachedVisionTranslation('https://arxiv.org/pdf/new.pdf', 1)).toBe('# New paper');
     expect(getCachedVisionTranslation('https://arxiv.org/pdf/old.pdf', 1)).toBeNull();
+  });
+
+  it('isolates cache per target language (vi vs ko vs ja)', () => {
+    const url = 'https://arxiv.org/pdf/multilingual.pdf';
+    setCachedVisionTranslation(url, 1, '# Giới thiệu tiếng Việt', 'gemini-3.5-flash-lite', 'vi');
+    setCachedVisionTranslation(url, 1, '# 한국어 소개', 'gemini-3.5-flash-lite', 'ko');
+    setCachedVisionTranslation(url, 1, '# 日本語の導入', 'gemini-3.5-flash-lite', 'ja');
+
+    expect(getCachedVisionTranslation(url, 1, 'gemini-3.5-flash-lite', 'vi')).toBe('# Giới thiệu tiếng Việt');
+    expect(getCachedVisionTranslation(url, 1, 'gemini-3.5-flash-lite', 'ko')).toBe('# 한국어 소개');
+    expect(getCachedVisionTranslation(url, 1, 'gemini-3.5-flash-lite', 'ja')).toBe('# 日本語の導入');
+  });
+});
+
+describe('Multilingual Translation Verification & Language Detection', () => {
+  it('correctly detects target language characteristics', () => {
+    expect(isTranslatedToTargetLanguage('Đây là bản dịch tiếng Việt học thuật chuẩn.', 'vi')).toBe(true);
+    expect(isTranslatedToTargetLanguage('This is an English sentence without diacritics.', 'vi')).toBe(false);
+
+    expect(isTranslatedToTargetLanguage('이 논문은 확산 모델에 대한 새로운 접근 방식을 제안합니다.', 'ko')).toBe(true);
+    expect(isTranslatedToTargetLanguage('This paper proposes a new method.', 'ko')).toBe(false);
+
+    expect(isTranslatedToTargetLanguage('本論文では拡散モデルの新しいアプローチを提案する。', 'ja')).toBe(true);
+    expect(isTranslatedToTargetLanguage('This paper proposes a new method.', 'ja')).toBe(false);
+
+    expect(isTranslatedToTargetLanguage('本文提出了一种基于扩散模型的新方法。', 'zh')).toBe(true);
+    expect(isTranslatedToTargetLanguage('This paper proposes a new method.', 'zh')).toBe(false);
+  });
+
+  it('does NOT falsely trigger English repair on Korean or Japanese text with scientific loanwords', () => {
+    const koreanMarkdown = `## 3. 방법론 (Methodology)
+우리는 diffusion models를 사용하여 CLIP guidance를 최적화하는 알고리즘을 제안합니다.
+이 공식 $z_t = \\alpha_t x + \\sigma_t \\epsilon$ 은 다음과 같이 표현됩니다:
+$$z_t' = \\sqrt{\\alpha_t} z_{t-1} + \\epsilon' \\tag{1}$$
+> **Figure 1**: Qualitative comparison on benchmark datasets.`;
+
+    // Target is 'ko' -> Should NOT trigger repair pass
+    expect(detectEnglishInMarkdown(koreanMarkdown, 'ko')).toBe(false);
+
+    const japaneseMarkdown = `## 3. 提案手法
+我々はdiffusion modelsとCLIP guidanceを用いた新しい生成手法を提案します。
+$$x_t = \\sqrt{\\alpha_t} x_0 + \\sigma_t \\epsilon \\tag{2}$$`;
+
+    // Target is 'ja' -> Should NOT trigger repair pass
+    expect(detectEnglishInMarkdown(japaneseMarkdown, 'ja')).toBe(false);
+  });
+
+  it('triggers repair when text is actually untranslated English paragraphs', () => {
+    const untranslatedMarkdown = `## 3. Proposed Method
+In this section, we introduce our novel approach to solve the problem of diffusion models and guidance generation.
+We show that by using this method, the results are significantly improved across all benchmarks.`;
+
+    // When target is 'ko' or 'vi', this purely English text MUST be detected
+    expect(detectEnglishInMarkdown(untranslatedMarkdown, 'ko')).toBe(true);
+    expect(detectEnglishInMarkdown(untranslatedMarkdown, 'vi')).toBe(true);
+
+    // When target is 'en', no repair needed
+    expect(detectEnglishInMarkdown(untranslatedMarkdown, 'en')).toBe(false);
   });
 });

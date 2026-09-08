@@ -22,6 +22,21 @@ export const DEFAULT_PDF_MODEL: Record<PdfProvider, string> = {
 export type ViewerFontFamily = 'system' | 'times' | 'palatino' | 'segoe' | 'arial';
 export type ViewerTheme = 'white' | 'sepia' | 'dark' | 'midnight' | 'oceanic';
 
+export const TARGET_LANGUAGE_MAP: Record<string, { promptName: string; nativeName: string }> = {
+  vi: { promptName: 'Tiếng Việt (Vietnamese)', nativeName: 'Tiếng Việt' },
+  ko: { promptName: '한국어 (Korean)', nativeName: '한국어' },
+  ja: { promptName: '日本語 (Japanese)', nativeName: '日本語' },
+  zh: { promptName: '中文 (Chinese)', nativeName: '中文' },
+  en: { promptName: 'English', nativeName: 'English' },
+  fr: { promptName: 'Français (French)', nativeName: 'Français' },
+  de: { promptName: 'Deutsch (German)', nativeName: 'Deutsch' },
+};
+
+export function getTargetLanguagePromptName(code: string): string {
+  const trimmed = (code || 'vi').trim();
+  return TARGET_LANGUAGE_MAP[trimmed]?.promptName || trimmed;
+}
+
 export interface ApiKeyItem {
   id: string;
   provider: PdfProvider;

@@ -1,5 +1,10 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import { type Settings, getProviderKeys } from '../settings';
+import {
+  type Settings,
+  getProviderKeys,
+  TARGET_LANGUAGE_MAP,
+  getTargetLanguagePromptName,
+} from '../settings';
 import { fetchWithRetry } from '../providers/fetch-retry';
 import { getKeyRouter } from '../providers/key-router';
 import {
@@ -13,16 +18,23 @@ const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const ZEN_BASE_URL = 'https://opencode.ai/zen/v1';
 const VISION_CANDIDATE_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.5-flash'];
 
+export { TARGET_LANGUAGE_MAP, getTargetLanguagePromptName };
+
 /**
  * Builds the specialized Academic Multimodal Paper Translation Prompt
  */
-function buildVisionPrompt(targetLang: string): string {
-  return `Bạn là một chuyên gia dịch thuật tài liệu khoa học máy tính AI xuất sắc (Arxiv, CVPR, NeurIPS, ICML).
+function buildVisionPrompt(targetLangCode: string): string {
+  const targetLang = getTargetLanguagePromptName(targetLangCode);
+  const isVietnamese = !targetLangCode || targetLangCode === 'vi';
+
+  if (isVietnamese) {
+    return `Bạn là một chuyên gia dịch thuật tài liệu khoa học máy tính AI xuất sắc (Arxiv, CVPR, NeurIPS, ICML).
 Nhiệm vụ duy nhất của bạn là ĐỌC ẢNH VÀ DỊCH TOÀN BỘ NỘI DUNG CỦA TRANG SANG ${targetLang} dưới định dạng MARKDOWN HỌC THUẬT CHUẨN XÁC CAO.
 
 CẢNH BÁO TỐI THƯỢNG (CHỐNG BẪY CHÉP NGUYÊN VĂN OCR & TRÔI NGÔN NGỮ):
-- Đây là tác vụ DỊCH THUẬT HỌC THUẬT (TRANSLATION), TUYỆT ĐỐI KHÔNG ĐƯỢC chạy chế độ chép lại nguyên văn tiếng Anh (OCR Transcription).
+- Đây là tác vụ DỊCH THUẬT HỌC THUẬT (TRANSLATION sang ${targetLang}), TUYỆT ĐỐI KHÔNG ĐƯỢC chạy chế độ chép lại nguyên văn tiếng Anh (OCR Transcription).
 - Nghiêm cấm trả về toàn bộ trang bằng tiếng Anh hoặc bỏ sót không dịch các đoạn văn.
+- TUYỆT ĐỐI CHỈ DỊCH SANG ${targetLang}, TUYỆT ĐỐI KHÔNG ĐƯỢC tự ý dịch sang bất kỳ ngôn ngữ nào khác.
 - Dù sau các khối phương trình toán hay sau các Hình ảnh/Biểu đồ, bạn PHẢI TIẾP TỤC DỊCH SANG ${targetLang}, TUYỆT ĐỐI KHÔNG được chuyển đột ngột sang tiếng Anh.
 
 QUY TẮC PHÂN ĐỊNH RANH GIỚI BẮT BUỘC:
@@ -54,15 +66,15 @@ QUY TẮC BỐ CỤC & THỨ TỰ ĐỌC TRANG:
      + Nhận diện rãnh khoảng trắng phân cách Cột Trái (Cột 1) và Cột Phải (Cột 2).
      + Phần trải rộng toàn trang (Full-width như Tiêu đề bài báo, Abstract, hoặc Hình ảnh/Bảng biểu trải rộng cả 2 cột): Đọc toàn bộ theo thứ tự từ trên xuống dưới.
      + Phần chia 2 cột: BẮT BUỘC ĐỌC VÀ DỊCH TOÀN BỘ CỘT TRÁI (Cột 1) TỪ TRÊN XUỐNG DƯỚI TRƯỚC, rồi mới chuyển sang đọc CỘT PHẢI (Cột 2) từ trên xuống dưới.
-     + TUYỆT ĐỐI KHÔNG ĐƯỢC NHẢY CỘT: Dù ở đầu Cột 1 có Hình ảnh (ví dụ Figure 10), Bảng biểu hay phương trình, bạn PHẢI dịch Hình ảnh đó và TẤT CẢ các đoạn văn, tiểu mục thảo luận bên dưới hình ở Cột 1 (ví dụ: tiểu mục thí nghiệm "Segmentation-Guided Inpainting...") TRƯỚC!
-     + Không được thấy đề mục lớn ở Cột 2 (như "5. Limitations", "6. Conclusion") mà nhảy sang dịch Cột 2 trước.
+     + TUYỆT ĐỐI KHÔNG ĐƯỢC NHẢY CỘT: Dù ở đầu Cột 1 có Hình ảnh (ví dụ Figure 10), Bảng biểu hay phương trình, bạn PHẢI dịch Hình ảnh đó và TẤT CẢ các đoạn văn, tiểu mục thảo luận bên dưới hình ở Cột 1 TRƯỚC!
+     + Không được thấy đề mục lớn ở Cột 2 mà nhảy sang dịch Cột 2 trước.
      + Không được gom Hình ảnh hoặc các đoạn văn ở Cột 1 ném xuống sau mục Conclusion hay References của Cột 2.
    - TÍNH LIÊN TỤC VỀ MẠCH VĂN VÀ ĐỀ MỤC (LOGICAL FLOW):
      + Luôn kiểm tra tính liên tục logic của các đề mục: Nội dung của Mục 4 PHẢI nằm trước Mục 5, Mục 5 trước Mục 6, Mục 6 trước Mục 7, và Mục 7 trước References.
-     + Nối dòng giữa 2 cột: Nếu dòng cuối cùng của Cột Trái kết thúc ngắt dở một câu hoặc một từ (ví dụ "...individual guid-"), hãy ghép liền với phần tiếp theo ở đầu Cột Phải (ví dụ "ance functions." -> "guidance functions.") để tạo thành câu hoàn chỉnh trước khi sang đề mục mới.
+     + Nối dòng giữa 2 cột: Nếu dòng cuối cùng của Cột Trái kết thúc ngắt dở một câu hoặc một từ, hãy ghép liền với phần tiếp theo ở đầu Cột Phải để tạo thành câu hoàn chỉnh trước khi sang đề mục mới.
 4. ĐỀ MỤC & ĐOẠN VĂN:
-   - Dùng # cho Tiêu đề bài báo (tiếng Anh gốc), ## cho Section Heading (ví dụ: ## 1. Giới thiệu, ## 4.1. Kết quả cho Stable Diffusion, ## 5. Hạn chế, ## 6. Kết luận), ### cho Sub-section.
-   - Dịch văn phong học thuật, tự nhiên, chính xác, liên kết chặt chẽ.
+   - Dùng # cho Tiêu đề bài báo (tiếng Anh gốc), ## cho Section Heading (dịch tiêu đề đề mục sang ${targetLang}), ### cho Sub-section.
+   - Dịch văn phong học thuật, tự nhiên, chính xác, liên kết chặt chẽ bằng ${targetLang}.
 5. HÌNH ẢNH & BIỂU ĐỒ:
    - Khi gặp Hình ảnh hoặc Biểu đồ trong trang, hãy tạo block trích dẫn Markdown theo đúng vị trí xuất hiện của nó:
      > **Figure X**: <Tiêu đề caption tiếng Anh gốc của Figure X>
@@ -79,6 +91,47 @@ QUY TẮC BỐ CỤC & THỨ TỰ ĐỌC TRANG:
 NHẮC LẠI BẮT BUỘC TRƯỚC KHI XUẤT KẾT QUẢ:
 - Kiểm tra lại toàn bộ: TẤT CẢ các đoạn văn bản (ngoại trừ dòng caption Figure và danh từ riêng viết hoa) BẮT BUỘC ĐÃ ĐƯỢC DỊCH SANG ${targetLang}.
 - Hãy trả về TRỰC TIẾP nội dung Markdown hoàn chỉnh bằng ${targetLang}, không bọc ngoài bằng \`\`\`markdown.`;
+  }
+
+  return `You are an expert AI/Computer Science academic paper translator (Arxiv, CVPR, NeurIPS, ICML).
+Your sole task is to READ THE IMAGE OF THIS PDF PAGE AND TRANSLATE ALL ITS CONTENT INTO ${targetLang} in high-precision ACADEMIC MARKDOWN format.
+
+SUPREME DIRECTIVE (ANTI-DRIFT & ANTI-OCR TRAP):
+- This is an ACADEMIC TRANSLATION task into ${targetLang}. NEVER simply transcribe the English text (no raw OCR).
+- It is strictly forbidden to return the page in English (except for allowed terms below) or leave paragraphs untranslated.
+- You must ONLY translate into ${targetLang}. DO NOT translate into Vietnamese or any other language unless ${targetLang} is Vietnamese.
+- Even after mathematical equations or figures/diagrams, you MUST CONTINUE TRANSLATING INTO ${targetLang}.
+
+BOUNDARIES & RULES:
+1. DISCUSSION PARAGRAPHS — 100% MUST BE TRANSLATED INTO ${targetLang}:
+   - All explanatory paragraphs, analyses, methodology from top to bottom MUST BE TRANSLATED INTO ${targetLang}.
+   - Even when paragraphs mention Figures ("In Figure 6, we see..."), contain uppercase model names (MTCNN, Stable Diffusion, Faster-RCNN, ResNet), or appear right under an image, you MUST TRANSLATE THE PARAGRAPH INTO ${targetLang} (only preserving proper nouns/model names).
+2. ONLY THE FOLLOWING ELEMENTS MAY REMAIN IN ORIGINAL ENGLISH:
+   - Paper Title (# Paper Title) on page 1.
+   - Direct Figure caption quotes: > **Figure X**: <English Caption>
+   - Short visual diagram labels inside figures (e.g., > *Masked Image* | *Clf. Guided*).
+   - Proper model/framework names (Diffusion Models, Stable Diffusion, DDIM, CLIP, LoRA, ResNet).
+   - Author names, university affiliations, GitHub/URLs.
+   - LaTeX mathematical variables and expressions within $...$ or $$...$$.
+3. MATHEMATICAL FORMULAS & LATEX:
+   - Inline math: $z_t$, $\\alpha_t$.
+   - Display equations in $$...$$ with \\tag{N} for numbering:
+     $$z_t' = \\sqrt{\\alpha_t / \\alpha_{t-1}} \\cdot z_{t-1} + \\sqrt{1 - \\alpha_t / \\alpha_{t-1}} \\cdot \\epsilon' \\tag{10}$$
+   - NEVER embed equation numbers inside the equation fractions or functions. Use \\tag{N}.
+4. READING ORDER & LAYOUT:
+   - SINGLE-COLUMN: Read sequentially from top to bottom.
+   - TWO-COLUMN: Read and translate the entire LEFT COLUMN from top to bottom FIRST, then move to the RIGHT COLUMN from top to bottom. NEVER jump across columns prematurely.
+5. HEADINGS & SECTIONS:
+   - Use # for Paper Title, ## for Section Headings (translate heading into ${targetLang}), ### for Sub-sections.
+   - Output natural, fluent academic style in ${targetLang}.
+6. ALGORITHMS:
+   - **Algorithm X: <Name>**
+   - **Parameter:** ..., **Required:** ..., **Input:** ..., **Output:** ...
+   - Bold keywords: **for**, **do**, **if**, **then**, **end if**, **end for**, **while**, **return**.
+
+FINAL CHECK BEFORE OUTPUT:
+- Verify: ALL paragraphs (except Figure captions and proper model names) MUST BE TRANSLATED INTO ${targetLang}.
+- Return RAW Markdown directly in ${targetLang}. DO NOT wrap output with \`\`\`markdown.`;
 }
 
 /**
@@ -214,8 +267,14 @@ export function pruneVisionCacheRegistry(registry?: VisionCacheRegistry): Vision
   return reg;
 }
 
-function getVisionCacheKey(pdfUrl: string, pageNumber: number, model: string): string {
-  return `live_trans_pdf_vision_${encodeURIComponent(pdfUrl)}_p${pageNumber}_${model}`;
+function getVisionCacheKey(
+  pdfUrl: string,
+  pageNumber: number,
+  model: string,
+  targetLang: string = 'vi',
+): string {
+  const lang = targetLang || 'vi';
+  return `live_trans_pdf_vision_${encodeURIComponent(pdfUrl)}_p${pageNumber}_${model}_${lang}`;
 }
 
 /**
@@ -226,19 +285,30 @@ export function getCachedVisionTranslation(
   pdfUrl: string,
   pageNumber: number,
   model: string = 'gemini-3.5-flash-lite',
+  targetLang: string = 'vi',
 ): string | null {
   try {
-    const key = getVisionCacheKey(pdfUrl, pageNumber, model);
+    const normLang = targetLang || 'vi';
+    const key = getVisionCacheKey(pdfUrl, pageNumber, model, normLang);
     const ls = getSafeStorage('local');
     const ss = getSafeStorage('session');
 
     let val: string | null = null;
     if (ls) {
       val = ls.getItem(key);
+      // Tương thích ngược: Nếu là tiếng Việt và chưa có key _vi, kiểm tra key cũ
+      if (!val && normLang === 'vi') {
+        const legacyKey = `live_trans_pdf_vision_${encodeURIComponent(pdfUrl)}_p${pageNumber}_${model}`;
+        val = ls.getItem(legacyKey);
+      }
     }
     if (!val && ss) {
       // Fallback kiểm tra sessionStorage
       val = ss.getItem(key);
+      if (!val && normLang === 'vi') {
+        const legacyKey = `live_trans_pdf_vision_${encodeURIComponent(pdfUrl)}_p${pageNumber}_${model}`;
+        val = ss.getItem(legacyKey);
+      }
       if (val && ls) {
         try {
           ls.setItem(key, val);
@@ -289,8 +359,10 @@ export function setCachedVisionTranslation(
   pageNumber: number,
   markdown: string,
   model: string = 'gemini-3.5-flash-lite',
+  targetLang: string = 'vi',
 ): void {
-  const key = getVisionCacheKey(pdfUrl, pageNumber, model);
+  const normLang = targetLang || 'vi';
+  const key = getVisionCacheKey(pdfUrl, pageNumber, model, normLang);
   const ls = getSafeStorage('local');
   const ss = getSafeStorage('session');
 
@@ -473,6 +545,46 @@ export function getVisionCacheStats(): { paperCount: number; maxPapers: number; 
 }
 
 /**
+ * Checks whether text contains characteristics of the target language.
+ */
+export function isTranslatedToTargetLanguage(text: string, targetLang: string): boolean {
+  const lang = (targetLang || 'vi').toLowerCase();
+
+  if (lang === 'vi') {
+    return /[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(text);
+  }
+
+  if (lang === 'ko') {
+    // Hangul syllables and jamo
+    return /[\uac00-\ud7af\u1100-\u11ff\u3130-\u318f]/u.test(text);
+  }
+
+  if (lang === 'ja') {
+    // Hiragana, Katakana, and CJK ideographs
+    return /[\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]/u.test(text);
+  }
+
+  if (lang === 'zh') {
+    // CJK ideographs
+    return /[\u4e00-\u9faf]/u.test(text);
+  }
+
+  if (lang === 'en') {
+    return true; // Target is English, no repair needed
+  }
+
+  if (lang === 'fr') {
+    return /[éàèùâêîôûëïüÿçœæ]/i.test(text);
+  }
+
+  if (lang === 'de') {
+    return /[äöüß]/i.test(text);
+  }
+
+  return false;
+}
+
+/**
  * Detects whether markdown contains untranslated English paragraphs or headings.
  * Ignores:
  * - LaTeX display equations ($$...$$) and inline math ($...$)
@@ -480,7 +592,10 @@ export function getVisionCacheStats(): { paperCount: number; maxPapers: number; 
  * - Algorithm structure lines
  * - Bibliography / References entries
  */
-function detectEnglishInMarkdown(markdown: string): boolean {
+export function detectEnglishInMarkdown(markdown: string, targetLang: string = 'vi'): boolean {
+  const lang = (targetLang || 'vi').toLowerCase();
+  if (lang === 'en') return false; // English is desired
+
   const lines = markdown.split('\n');
   let englishBlockCount = 0;
 
@@ -509,17 +624,19 @@ function detectEnglishInMarkdown(markdown: string): boolean {
       .replace(/\$[^$]+\$/g, '')
       .replace(/[*#_`]/g, '')
       .trim();
-    if (cleanText.length < 25) continue;
+    if (cleanText.length < 35) continue;
 
-    // Check for Vietnamese diacritics
-    const hasVietnameseDiacritics = /[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(cleanText);
+    // If the text is already translated into the target language, skip
+    if (isTranslatedToTargetLanguage(cleanText, lang)) {
+      continue;
+    }
 
-    // Common English words frequently present in scientific papers
+    // Common English sentence structure / stop words in scientific text
     const englishWordMatches = cleanText.match(
-      /\b(the|and|in|of|to|is|that|with|for|we|our|as|are|this|from|by|on|be|an|was|which|can|show|shows|using|algorithm|guidance|generation|results|demonstrate|method|proposed|paper|loss|models|diffusion|gradient|empirically|solve|equation|equations|table|figure)\b/gi,
+      /\b(the|and|in|of|to|is|that|with|for|we|our|as|are|this|from|by|on|be|an|was|which|can|show|shows|using|these|their|where|when|such|into|each|both|between|through|during)\b/gi,
     );
 
-    if (!hasVietnameseDiacritics && (englishWordMatches?.length || 0) >= 2) {
+    if ((englishWordMatches?.length || 0) >= 3) {
       englishBlockCount++;
     }
   }
@@ -530,31 +647,48 @@ function detectEnglishInMarkdown(markdown: string): boolean {
 /**
  * Verification Agent: Checks whether the output contains any untranslated English.
  * If detected, invokes a pure text translation pass (with no visual anchor) to repair
- * the paragraphs into academic Vietnamese while strictly preserving LaTeX math and figures.
+ * the paragraphs into the target language while strictly preserving LaTeX math and figures.
  */
 async function verifyAndRepairTranslation(
   markdown: string,
   settings: Settings,
 ): Promise<string> {
-  if (!detectEnglishInMarkdown(markdown)) {
+  const targetLangCode = settings.targetLang || 'vi';
+  if (!detectEnglishInMarkdown(markdown, targetLangCode)) {
     return markdown;
   }
 
-  console.info('[Live-Trans Vision] Verification Agent: Untranslated English detected. Running text repair pass...');
+  console.info(`[Live-Trans Vision] Verification Agent: Untranslated English detected for target '${targetLangCode}'. Running repair pass...`);
 
-  const targetLang = settings.targetLang === 'vi' || !settings.targetLang ? 'tiếng Việt' : settings.targetLang;
-  const prompt = `Bạn là chuyên gia dịch thuật bài báo khoa học AI/Deep Learning.
-Nhiệm vụ: Bản dịch Markdown dưới đây bị sót/chưa dịch các đoạn văn tiếng Anh. Hãy dịch toàn bộ các đoạn văn bản, tiêu đề đề mục (#, ##, ###) tiếng Anh sang ${targetLang} học thuật chuẩn xác, lưu loát và tự nhiên.
+  const targetLangName = getTargetLanguagePromptName(targetLangCode);
+  const isVietnamese = !targetLangCode || targetLangCode === 'vi';
+
+  const prompt = isVietnamese
+    ? `Bạn là chuyên gia dịch thuật bài báo khoa học AI/Deep Learning.
+Nhiệm vụ: Bản dịch Markdown dưới đây bị sót/chưa dịch các đoạn văn tiếng Anh. Hãy dịch toàn bộ các đoạn văn bản, tiêu đề đề mục (#, ##, ###) tiếng Anh sang ${targetLangName} học thuật chuẩn xác, lưu loát và tự nhiên.
 
 QUY TẮC BẮT BUỘC:
-1. Dịch toàn bộ các đoạn văn và tiêu đề đề mục (#, ##, ###) sang ${targetLang}.
-2. Giữ NGUYÊN 100% mọi công thức toán học $...$ và $$...$$ cùng các nhãn số thứ tự phương trình (ví dụ \\quad (6)).
+1. Dịch toàn bộ các đoạn văn và tiêu đề đề mục (#, ##, ###) sang ${targetLangName}.
+2. Giữ NGUYÊN 100% mọi công thức toán học $...$ và $$...$$ cùng các nhãn số thứ tự phương trình (ví dụ \\tag{10}).
 3. Giữ NGUYÊN dòng trích dẫn caption hình ảnh: > **Figure X**: ... (giữ nguyên tiếng Anh cho caption hình).
 4. Giữ NGUYÊN khối thuật toán nếu có: **Algorithm X: ...**, **Parameter:** ..., **Required:** ..., các từ khóa **for**, **do**, **if**, **then**, **end if**, v.v.
 5. Giữ nguyên tên mô hình, thuật ngữ viết hoa: Diffusion Models, Stable Diffusion, ResNet, Faster-RCNN, MTCNN, Facenet, DDIM, CLIP.
-6. Trả về TRỰC TIẾP định dạng Markdown hoàn chỉnh bằng ${targetLang}, TUYỆT ĐỐI không bọc ngoài bằng \`\`\`markdown.
+6. Trả về TRỰC TIẾP định dạng Markdown hoàn chỉnh bằng ${targetLangName}, TUYỆT ĐỐI không bọc ngoài bằng \`\`\`markdown.
 
 Nội dung Markdown cần hoàn thiện:
+${markdown}`
+    : `You are an expert AI/Deep Learning academic translator.
+Task: The following Markdown translation contains untranslated English paragraphs or headings. Translate all English paragraphs and section headings (#, ##, ###) into ${targetLangName}.
+
+CRITICAL REQUIREMENTS:
+1. TARGET LANGUAGE: Everything MUST be translated into ${targetLangName}. DO NOT output in Vietnamese or any other language unless the target language is Vietnamese.
+2. PRESERVE 100% of all LaTeX mathematical formulas $...$ and $$...$$, including equation tags (e.g. \\tag{10}).
+3. KEEP Figure caption lines in original English: > **Figure X**: ...
+4. KEEP Algorithm pseudocode blocks: **Algorithm X: ...**, **Parameter:** ..., keywords **for**, **do**, **if**, **then**, **end if**, etc.
+5. KEEP model and framework names: Diffusion Models, Stable Diffusion, ResNet, Faster-RCNN, MTCNN, Facenet, DDIM, CLIP.
+6. Return RAW Markdown directly in ${targetLangName}. DO NOT wrap output with \`\`\`markdown.
+
+Markdown content to complete:
 ${markdown}`;
 
   // 1. If user configured Zen (OpenCode Zen), try Zen first
@@ -658,9 +792,10 @@ export async function translatePageVision(
   const modelToUse = settings.pdfModel?.includes('flash')
     ? settings.pdfModel
     : 'gemini-3.5-flash-lite';
+  const targetLang = settings.targetLang || 'vi';
 
   if (!force) {
-    const cached = getCachedVisionTranslation(pdfUrl, pageNumber, modelToUse);
+    const cached = getCachedVisionTranslation(pdfUrl, pageNumber, modelToUse, targetLang);
     if (cached) {
       return cached;
     }
@@ -673,7 +808,7 @@ export async function translatePageVision(
 
   // 1. Render page to sharp 2x JPEG image
   const base64Image = await renderPageToBase64Jpeg(pdfDoc, pageNumber, 2.0);
-  const prompt = buildVisionPrompt(settings.targetLang || 'Tiếng Việt');
+  const prompt = buildVisionPrompt(targetLang);
 
   const modelsToTry = [modelToUse, ...VISION_CANDIDATE_MODELS.filter((m) => m !== modelToUse)];
   let lastError: any = null;
@@ -732,7 +867,7 @@ export async function translatePageVision(
       if (result) {
         // Run Verification Agent: automatically repairs any language drift or untranslated blocks
         const verifiedResult = await verifyAndRepairTranslation(result, settings);
-        setCachedVisionTranslation(pdfUrl, pageNumber, verifiedResult, model);
+        setCachedVisionTranslation(pdfUrl, pageNumber, verifiedResult, model, targetLang);
         return verifiedResult;
       }
     } catch (err) {

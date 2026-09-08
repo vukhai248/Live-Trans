@@ -1,4 +1,4 @@
-import { type Settings, getProviderKeys } from '../settings';
+import { type Settings, getProviderKeys, getTargetLanguagePromptName } from '../settings';
 import type { TextBlock, TranslatedBlock, PageTranslationResult } from './types';
 import { fetchWithRetry } from '../providers/fetch-retry';
 import { getKeyRouter } from '../providers/key-router';
@@ -72,8 +72,9 @@ function buildPageTranslatePrompt(
   // P3: payload JSON compact (không indent) để tiết kiệm token mỗi batch.
   const payload = JSON.stringify(items);
 
+  const targetLangPrompt = getTargetLanguagePromptName(targetLang);
   return `Bạn là dịch giả học thuật chuyên nghiệp cho các bài báo khoa học hàng đầu (Arxiv, CVPR, NeurIPS, ICML).
-Nhiệm vụ: Dịch các câu trong danh sách sang ${targetLang}.
+Nhiệm vụ: Dịch các câu trong danh sách sang ${targetLangPrompt}.
 
 QUY TẮC BẮT BUỘC:
 1. ÁNH XẠ 1:1 NGHIÊM NGẶT:
@@ -91,7 +92,7 @@ QUY TẮC BẮT BUỘC:
 5. QUY TẮC THUẬT NGỮ CHUYÊN NGÀNH:
 ${glossaryBlock}
 6. VĂN PHONG HỌC THUẬT:
-   - Tự nhiên, chính xác, súc tích, mạch lạc theo chuẩn văn phong khoa học tiếng Việt.
+   - Tự nhiên, chính xác, súc tích, mạch lạc theo chuẩn văn phong khoa học của ${targetLangPrompt}.
 7. ĐỊNH DẠNG ĐẦU RA:
    - Trả về DUY NHẤT một JSON object có format: {"id": "câu đã dịch", ...} tương ứng đủ mọi id đầu vào. KHÔNG viết thêm bất kỳ lời dẫn hay markdown giải thích nào.
 
@@ -550,7 +551,7 @@ export async function translatePageBlocks(
   }
 
   // 2. Gather sentences for translation, bypassing math formulas
-  const targetLang = settings.targetLang === 'vi' ? 'tiếng Việt' : settings.targetLang;
+  const targetLang = getTargetLanguagePromptName(settings.targetLang || 'vi');
   const sentencePayload: Record<string, string> = {};
   const directFormulaMap: Record<string, string> = {};
 

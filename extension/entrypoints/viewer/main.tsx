@@ -293,13 +293,14 @@ export function ViewerApp() {
     // 1. Kiểm tra cache trước — nạp tức thì trong 0ms nếu đã có
     if (!force) {
       const modelToUse = settings.pdfModel || 'gemini-3.5-flash-lite';
+      const targetLang = settings.targetLang || 'vi';
       const candidates = [
         modelToUse,
         'gemini-3.5-flash-lite',
         'gemini-3.5-flash',
       ];
       for (const m of candidates) {
-        const cached = getCachedVisionTranslation(pdfUrl, pageNumber, m);
+        const cached = getCachedVisionTranslation(pdfUrl, pageNumber, m, targetLang);
         if (cached) {
           setPageVisionTranslations((prev) => ({ ...prev, [pageNumber]: cached }));
           pageVisionTranslationsRef.current[pageNumber] = cached;
@@ -358,7 +359,7 @@ export function ViewerApp() {
           const p = highPriorityQueueRef.current.shift()!;
           if (activeProcessingPagesRef.current.has(p)) continue;
           const modelToUse = settings.pdfModel || 'gemini-3.5-flash-lite';
-          const cached = getCachedVisionTranslation(pdfUrl, p, modelToUse);
+          const cached = getCachedVisionTranslation(pdfUrl, p, modelToUse, settings.targetLang || 'vi');
           if (cached) {
             setPageVisionTranslations((prev) => ({ ...prev, [p]: cached }));
             pageVisionTranslationsRef.current[p] = cached;
@@ -379,7 +380,7 @@ export function ViewerApp() {
             const p = waterfallQueueRef.current.shift()!;
             if (activeProcessingPagesRef.current.has(p)) continue;
             const modelToUse = settings.pdfModel || 'gemini-3.5-flash-lite';
-            const cached = getCachedVisionTranslation(pdfUrl, p, modelToUse);
+            const cached = getCachedVisionTranslation(pdfUrl, p, modelToUse, settings.targetLang || 'vi');
             if (cached) {
               setPageVisionTranslations((prev) => ({ ...prev, [p]: cached }));
               pageVisionTranslationsRef.current[p] = cached;
@@ -476,7 +477,7 @@ export function ViewerApp() {
     for (const p of batchPages) {
       if (!force) {
         const modelToUse = settings.pdfModel || 'gemini-3.5-flash-lite';
-        const cached = getCachedVisionTranslation(pdfUrl, p, modelToUse);
+        const cached = getCachedVisionTranslation(pdfUrl, p, modelToUse, settings.targetLang || 'vi');
         if (cached) {
           setPageVisionTranslations((prev) => ({ ...prev, [p]: cached }));
           pageVisionTranslationsRef.current[p] = cached;
@@ -567,10 +568,11 @@ export function ViewerApp() {
     prioritizeVisionPage(pageNumber, true);
   };
 
-  // Preload cached vision translations & Khởi chạy Background Waterfall khi nạp tài liệu
+  // Preload cached vision translations & Khởi chạy Background Waterfall khi nạp tài liệu hoặc đổi model/ngôn ngữ
   useEffect(() => {
     if (readerMode !== 'vision' || !pdfUrl || !pdfDoc || numPages <= 0) return;
-    const initKey = `${pdfUrl}_${settings.pdfModel}_${numPages}`;
+    const targetLang = settings.targetLang || 'vi';
+    const initKey = `${pdfUrl}_${settings.pdfModel}_${targetLang}_${numPages}`;
     if (initializedWaterfallRef.current === initKey) return;
     initializedWaterfallRef.current = initKey;
 
@@ -579,34 +581,29 @@ export function ViewerApp() {
     const model = settings.pdfModel || 'gemini-3.5-flash-lite';
     const unrendered: number[] = [];
 
-      for (let p = 1; p <= numPages; p++) {
-        const cached = getCachedVisionTranslation(pdfUrl, p, model);
-        if (cached) {
-          initialTrans[p] = cached;
-          initialStatus[p] = 'done';
-        } else {
-          initialStatus[p] = 'queued';
-          unrendered.push(p);
-        }
+    for (let p = 1; p <= numPages; p++) {
+      const cached = getCachedVisionTranslation(pdfUrl, p, model, targetLang);
+      if (cached) {
+        initialTrans[p] = cached;
+        initialStatus[p] = 'done';
+      } else {
+        initialStatus[p] = 'queued';
+        unrendered.push(p);
       }
+    }
 
-      setPageVisionTranslations((prev) => {
-        const merged = { ...initialTrans, ...prev };
-        pageVisionTranslationsRef.current = merged;
-        return merged;
-      });
-      setPageVisionStatus((prev) => {
-        const merged = { ...initialStatus, ...prev };
-        pageVisionStatusRef.current = merged;
-        return merged;
-      });
+    // Gán sạch state cho ngữ cảnh ngôn ngữ/model mới (không giữ text ngôn ngữ cũ)
+    setPageVisionTranslations(initialTrans);
+    pageVisionTranslationsRef.current = initialTrans;
+    setPageVisionStatus(initialStatus);
+    pageVisionStatusRef.current = initialStatus;
 
-      // Nạp danh sách các trang chưa dịch vào hàng đợi thác nước
-      waterfallQueueRef.current = unrendered;
+    // Nạp danh sách các trang chưa dịch vào hàng đợi thác nước
+    waterfallQueueRef.current = unrendered;
 
-      // Ưu tiên ngay trang 1 (hoặc trang hiện tại)
-      prioritizeVisionPage(currentPage || 1);
-  }, [readerMode, pdfUrl, pdfDoc, numPages, settings.pdfModel, prioritizeVisionPage]);
+    // Ưu tiên ngay trang 1 (hoặc trang hiện tại)
+    prioritizeVisionPage(currentPage || 1);
+  }, [readerMode, pdfUrl, pdfDoc, numPages, settings.pdfModel, settings.targetLang, prioritizeVisionPage]);
 
   // 2. Synchronized scrolling between left and right panels with Page-to-Page alignment
   const handleLeftScroll = () => {
@@ -1395,7 +1392,7 @@ export function ViewerApp() {
 
               <div style={{ marginTop: 'auto', padding: '12px 6px 4px 6px', borderTop: '1px solid #202024' }}>
                 <div style={{ fontSize: '11px', color: '#71717a', lineHeight: '1.4' }}>
-                  Live-Trans v1.1.0<br/>
+                  Live-Trans v1.1.1<br/>
                   Tối ưu cho Paper PDF
                 </div>
               </div>

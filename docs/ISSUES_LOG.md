@@ -45,7 +45,8 @@ Tài liệu này tổng hợp toàn bộ các lỗi phát sinh trong quá trình
 | **ISSUE-035** | LaTeX / Equation Numbering | Số thứ tự phương trình (17, 18, 19) bị gộp vào bên trong biểu thức toán (nhét vào tử số `\frac{... (17)}{...}` hoặc ngoặc hàm `D(x(19))`), hoặc bị dính sát lề phải công thức thay vì căn lề phải mép trang. | VLM đọc 2D ngang hàng với tử số/hàm số và sinh token autoregressive; Prompt hướng dẫn dùng `\quad (10)` thay vì lệnh chuẩn `\tag{N}`; KaTeX renderer thiếu bộ lọc regex tự động bóc tách và chuẩn hóa tag. | (1) Cập nhật Prompt bắt buộc dùng chuẩn `\tag{N}` và nghiêm cấm nhét vào ngoặc/tử số; (2) Tạo module `normalizeEquationLatex` tự động bóc tách số thứ tự bị kẹt chuyển thành `\tag{N}` căn lề phải chuẩn KaTeX; (3) Tinh chỉnh CSS `.lt-vision-display-eq .katex-display { width: 100% }`. | ✅ Đã khắc phục & Kiểm chứng |
 | **ISSUE-036** | UI / Typography Scaling | Chỉnh cỡ chữ bản dịch trong Cài đặt (ví dụ lên 26px) chỉ đổi khung preview nhưng nội dung Markdown bản dịch thực tế trong pane đọc không thay đổi kích thước; do Markdown có phân cấp tiêu đề (`#`, `##`, `###`) và các class CSS bị hardcode cứng bằng pixel cố định. | (1) Các class Markdown `.lt-vision-h1`, `.lt-vision-h2`, `.lt-vision-paragraph`, `.lt-vision-table`... được hardcode giá trị px tĩnh trong CSS; (2) Cỡ chữ đơn thuần không áp dụng được cho cấu trúc Markdown phân cấp nhiều tầng; cần chuyển sang hướng Scale tỷ lệ (Relative Typography Scaling) trên container hiển thị Markdown. | (1) Áp dụng biến CSS `--lt-content-scale` và CSS `zoom: var(--lt-content-scale, 1)` trên `.lt-vision-body` và Whiteboard, co giãn đồng bộ 100% tiêu đề, văn bản, KaTeX math và bảng số liệu mà không vỡ bố cục; (2) Tinh giản UI Cài đặt: Dải nút chọn nhanh (85%-175%) kèm thanh kéo trượt mượt mà và badge hiển thị % sắc nét, loại bỏ ô số spinner và nút đặt lại thừa thãi. | ✅ Đã khắc phục & Kiểm chứng |
 | **ISSUE-037** | UI / Dark Theme Contrast | Khi chọn Theme Tối (Dark), chữ tiêu đề H1-H3 và các đoạn văn bản Markdown bị chìm nghỉm vào nền đen tối không đọc được gì; do các class Markdown bị hardcode màu chữ đen `#0f172a`, `#334155` mà thiếu rule ghi đè màu sáng trong `.lt-theme-dark`. | Thiếu CSS selector ghi đè màu chữ cho các phần tử con Markdown bên trong container `.lt-theme-dark` (bao gồm H1-H3, paragraph, blockquote, KaTeX math, bảng biểu). | Bổ sung đầy đủ bảng màu tương phản cao cho `.lt-theme-dark` và các biến thể theme tối mới: chữ xám trắng `#f1f5f9`, tiêu đề xanh sáng `#38bdf8`, công thức và bảng biểu sáng rõ. | ⏳ Đang chờ người dùng phê duyệt |
-| **ISSUE-038** | Typography / Vietnamese Font Glyphs | Font `Merriweather` bị lỗi dấu tiếng Việt (vỡ chữ, lệch dấu thanh điệu); font `Inter` bị trùng lặp với tùy chọn Hệ thống mặc định. | `Merriweather` webfont chưa nạp đủ bộ ký tự Latinh mở rộng (Vietnamese subset) trên một số môi trường máy trạm; giao diện hiển thị dạng 4 ô nút to chiếm nhiều không gian. | (1) Xóa `Merriweather` và gộp `Inter` vào Hệ thống; (2) Bổ sung các font học thuật serif và sans-serif hỗ trợ tiếng Việt tuyệt đối 100% (`Times New Roman`, `Georgia`, `Palatino`, `Segoe UI/Roboto`); (3) Chuyển đổi sang dạng Popup Dropdown `<select>` sang trọng, tinh gọn diện tích. | ⏳ Đang chờ người dùng phê duyệt |
+| **ISSUE-038** | Typography / Vietnamese Font Glyphs | Font `Merriweather` bị lỗi dấu tiếng Việt (vỡ chữ, lệch dấu thanh điệu); font `Inter` bị trùng lặp với tùy chọn Hệ thống mặc định. | `Merriweather` webfont chưa nạp đủ bộ ký tự Latinh mở rộng (Vietnamese subset) trên một số môi trường máy trạm; giao diện hiển thị dạng 4 ô nút to chiếm nhiều không gian. | (1) Xóa `Merriweather` và gộp `Inter` vào Hệ thống; (2) Bổ sung các font học thuật serif và sans-serif hỗ trợ tiếng Việt tuyệt đối 100% (`Times New Roman`, `Palatino`, `Segoe UI/Roboto`, `Arial`); (3) Chuyển đổi sang dạng Popup Dropdown CustomSelect sang trọng. | ✅ Đã khắc phục & Kiểm chứng |
+| **ISSUE-040** | VLM / Multi-Language Translation | Khi chọn ngôn ngữ đích Tiếng Hàn (`ko`), một số trang dịch đúng nhưng đa số vẫn trả về Tiếng Việt dù đã bấm "Dịch lại toàn bộ". | (1) Cache key thiếu `targetLang`, tự nạp bản dịch tiếng Việt cũ; (2) `detectEnglishInMarkdown` chỉ kiểm tra dấu tiếng Việt, nhầm lẫn tiếng Hàn chứa thuật ngữ tiếng Anh là chưa dịch; (3) `verifyAndRepairTranslation` dùng prompt tiếng Việt và mã `ko` thô khiến AI dịch ngược về tiếng Việt; (4) `main.tsx` không nạp mới ngữ cảnh khi đổi ngôn ngữ. | (1) Bổ sung `targetLang` vào cache key; (2) Bộ lọc nhận diện ký tự đa ngữ (Hangul, Kana, Kanji, Diacritics); (3) Tách System Prompt tiếng Anh cho ngoại ngữ chống language drift; (4) Tự động làm mới state và hàng đợi khi đổi `targetLang`. | ✅ Đã khắc phục & Kiểm chứng |
 
 ---
 
@@ -353,3 +354,49 @@ flowchart TD
   - Đã loại bỏ triệt để font Georgia.
   - Đã tích hợp CustomSelect đồng bộ 100% với giao diện Dark Modern của Live-Trans.
   - Chữ tiếng Việt hiển thị liền mạch hoàn hảo, không còn tình trạng hở dấu.
+
+---
+
+## 13. Phân tích Chi tiết ISSUE-040: Lỗi Trôi Ngôn Ngữ Dịch Đa Ngữ (Tiếng Hàn, v.v. bị trả về Tiếng Việt)
+
+- **Hiện tượng**:
+  - Khi người dùng vào Cài đặt đổi `Ngôn ngữ đích (Target Language)` sang **Tiếng Hàn (`ko`)**:
+    - Một số trang (như Trang 2) dịch đúng tiếng Hàn (`가이던스 함수...`).
+    - Tuy nhiên, đa số các trang còn lại (như Trang 3, Trang 1...) vẫn hiển thị nguyên bản tiếng Việt (`Hướng Dẫn Phổ Quát cho Diffusion Models... 2. Tạo Ảnh Có Kiểm Soát`).
+- **Nguyên nhân gốc rễ**:
+  1. **Khóa Cache Thông Minh (Smart Cache Key) thiếu định danh Ngôn ngữ (`targetLang`)**:
+     - Hàm tạo cache key trong `vision-translate.ts`:
+       ```ts
+       function getVisionCacheKey(pdfUrl: string, pageNumber: number, model: string): string {
+         return `live_trans_pdf_vision_${encodeURIComponent(pdfUrl)}_p${pageNumber}_${model}`;
+       }
+       ```
+     - Key chỉ gồm URL bài báo, số trang và model, hoàn toàn không có `targetLang`.
+     - Khi mở tài liệu lần đầu ở ngôn ngữ mặc định (Tiếng Việt), luồng dịch nền Waterfall đã dịch và lưu Trang 1, 3, 4, 5... bằng Tiếng Việt vào localStorage. Khi người dùng đổi sang Tiếng Hàn, hệ thống kiểm tra cache thấy đã có sẵn thì trả về ngay 0ms bản dịch Tiếng Việt cũ thay vì dịch mới!
+  2. **Truyền mã ngôn ngữ thô (`ko`) vào System Prompt**:
+     - `buildVisionPrompt(settings.targetLang || 'Tiếng Việt')`: Khi `settings.targetLang = 'ko'`, prompt gửi tới AI có đoạn: `...DỊCH TOÀN BỘ NỘI DUNG CỦA TRANG SANG ko dưới định dạng MARKDOWN...`. Trong ngữ cảnh tiếng Việt, `ko` là viết tắt của từ "không", dễ khiến AI bối rối.
+     - Ngoài ra, trong prompt chứa các ví dụ tiêu đề tiếng Việt cố định (`ví dụ: ## 1. Giới thiệu, ## 5. Hạn chế, ## 6. Kết luận`), gây hiệu ứng mồi (priming) khiến mô hình sinh tiêu đề tiếng Việt.
+  3. **Bộ lọc Kiểm định Sửa lỗi (`detectEnglishInMarkdown`) phân biệt sai ngôn ngữ**:
+     - Hàm `detectEnglishInMarkdown` kiểm tra sự tồn tại của dấu tiếng Việt (`hasVietnameseDiacritics`). Với tiếng Hàn (`한국어`), câu văn hoàn toàn không có dấu tiếng Việt; khi trong đoạn văn xuất hiện từ vựng kỹ thuật tiếng Anh (`diffusion`, `guidance`, `CLIP`), bộ lọc phán đoán nhầm là "đoạn văn tiếng Anh chưa dịch" và chuyển sang bước `verifyAndRepairTranslation`. Bước này chạy prompt sửa lỗi và dịch đè ngược trở lại tiếng Việt.
+  4. **State trong `main.tsx` không phản ứng khi đổi `targetLang`**:
+     - Biến cờ `initKey = ${pdfUrl}_${settings.pdfModel}_${numPages}` thiếu `settings.targetLang`, khiến giao diện không kích hoạt làm mới danh sách trang và nạp lại hàng đợi khi người dùng chọn ngôn ngữ mới trong modal Cài đặt.
+- **Giải pháp đề xuất**:
+  1. **Nâng cấp Cache Key đa ngôn ngữ**:
+     - `getVisionCacheKey(pdfUrl, pageNumber, model, targetLang)` gắn hậu tố `_${targetLang}` (ví dụ: `_ko`, `_vi`).
+     - Tương thích ngược: Với `targetLang = 'vi'`, tự động fallback nạp cache cũ nếu có. Với ngôn ngữ khác (`ko`, `ja`, `zh`...), đảm bảo không bao giờ bị nạp nhầm cache tiếng Việt.
+  2. **Ánh xạ Tên Ngôn ngữ Đầy đủ & Rõ Ràng (Target Language Prompt Mapping)**:
+     - Tạo từ điển ánh xạ mã ngôn ngữ sang tên chuẩn quốc tế song ngữ:
+       - `ko` $\rightarrow$ `한국어 (Korean)`
+       - `ja` $\rightarrow$ `日本語 (Japanese)`
+       - `zh` $\rightarrow$ `中文 (Chinese)`
+       - `vi` $\rightarrow$ `Tiếng Việt (Vietnamese)`
+       - `en` $\rightarrow$ `English`
+       - `fr` $\rightarrow$ `Français (French)`
+       - `de` $\rightarrow$ `Deutsch (German)`
+     - Cập nhật System Prompt: Yêu cầu dịch rõ ràng sang `${targetLangName}`, loại bỏ các ví dụ tiêu đề tiếng Việt hardcode và thay bằng hướng dẫn dịch tiêu đề theo đúng ngôn ngữ đích.
+  3. **Tối ưu hóa Bộ lọc `detectEnglishInMarkdown` cho Đa Ngôn Ngữ**:
+     - Nhận diện bảng ký tự của ngôn ngữ đích: nếu là tiếng Hàn thì kiểm tra ký tự Hangul `[\uac00-\ud7af]`, tiếng Nhật kiểm tra Hiragana/Katakana `[\u3040-\u30ff]`, tiếng Trung kiểm tra Hán tự `[\u4e00-\u9faf]`. Nếu đoạn văn đã chứa ký tự ngôn ngữ đích, tuyệt đối không coi là tiếng Anh chưa dịch.
+     - Đồng thời truyền đúng `targetLangName` vào bước `verifyAndRepairTranslation` nếu cần sửa lỗi.
+  4. **Tự động làm mới khi đổi Ngôn ngữ trong Viewer**:
+     - Đưa `settings.targetLang` vào `initKey` và dependency của effect quản lý hàng đợi. Khi người dùng đổi ngôn ngữ trong Cài đặt, hệ thống tự động reset trạng thái hiển thị của các trang hiện tại và ưu tiên dịch lại theo ngôn ngữ mới được chọn.
+
