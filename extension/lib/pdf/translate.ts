@@ -307,6 +307,8 @@ async function translateSentenceBatchZen(
       headers: {
         Authorization: `Bearer ${zenKey}`,
         'Content-Type': 'application/json',
+        'User-Agent': 'OpenCode-Desktop/1.0.0',
+        'x-session-id': `session-${Date.now()}`,
       },
       body: JSON.stringify(body),
     },

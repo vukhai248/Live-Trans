@@ -27,16 +27,22 @@ import { CustomSelect } from './CustomSelect';
 // Configure PDF.js worker from extension bundle
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('pdf.worker.min.mjs');
 
+function applyZoomStep(currentFactor: number, deltaY: number): number {
+  if (Math.abs(deltaY) < 1) return currentFactor;
+  const step = deltaY < 0 ? 0.08 : -0.08;
+  return Math.max(0.5, Math.min(3.0, Math.round((currentFactor + step) * 100) / 100));
+}
+
 export function ViewerApp() {
   const [pdfUrl, setPdfUrl] = useState<string>('');
   const [docTitle, setDocTitle] = useState<string>('Tài liệu PDF');
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [scale, setScale] = useState<number>(1.0);
-  const [zoomMode, setZoomMode] = useState<'fit' | 'custom'>('fit');
   const [leftFitScale, setLeftFitScale] = useState<number>(1.0);
   const [rightFitScale, setRightFitScale] = useState<number>(1.0);
+  const [leftZoomFactor, setLeftZoomFactor] = useState<number>(1.0);
+  const [rightZoomFactor, setRightZoomFactor] = useState<number>(1.0);
   const [viewMode, setViewMode] = useState<ViewMode>('bilingual');
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [isSidebarPinned, setIsSidebarPinned] = useState<boolean>(false);
@@ -44,7 +50,6 @@ export function ViewerApp() {
   // Vision AI (LaTeX) là mode đọc mặc định
   const [readerMode, setReaderMode] = useState<'whiteboard' | 'vision' | 'markdown' | 'overlay'>('vision');
   const [isModeMenuOpen, setIsModeMenuOpen] = useState<boolean>(false);
-  const [isZoomMenuOpen, setIsZoomMenuOpen] = useState<boolean>(false);
   const [pageVisionTranslations, setPageVisionTranslations] = useState<Record<number, string>>({});
   const [pageVisionStatus, setPageVisionStatus] = useState<Record<number, 'loading' | 'done' | 'error' | 'queued'>>({});
   const [activePriorityPages, setActivePriorityPages] = useState<number[]>([]);
@@ -88,7 +93,6 @@ export function ViewerApp() {
 
   // Hook theo dõi resize cửa sổ, kéo splitter, đóng/mở sidebar để auto-fit scale độc lập 2 bên
   useEffect(() => {
-    if (zoomMode !== 'fit') return;
     const handleResize = () => {
       const ls = calculatePaneFitScale(leftPaneRef.current);
       const rs = calculatePaneFitScale(rightPaneRef.current);
@@ -104,10 +108,11 @@ export function ViewerApp() {
       clearTimeout(t);
       window.removeEventListener('resize', handleResize);
     };
-  }, [zoomMode, calculatePaneFitScale, splitRatio, sidebarOpen, isSidebarPinned, viewMode, pdfDoc]);
+  }, [calculatePaneFitScale, splitRatio, sidebarOpen, isSidebarPinned, viewMode, pdfDoc]);
 
-  const effectiveLeftScale = zoomMode === 'fit' ? leftFitScale : scale;
-  const effectiveRightScale = zoomMode === 'fit' ? rightFitScale : scale;
+  // Tỷ lệ hiển thị thực tế: Base Fit Width * Hệ số zoom tạm thời (Ctrl + Wheel)
+  const effectiveLeftScale = leftFitScale * leftZoomFactor;
+  const effectiveRightScale = rightFitScale * rightZoomFactor;
 
   // 1. Initialize settings & load PDF document
   useEffect(() => {
@@ -168,7 +173,6 @@ export function ViewerApp() {
       const target = e.target as HTMLElement | null;
       if (!target?.closest('.lt-dropdown-container')) {
         setIsModeMenuOpen(false);
-        setIsZoomMenuOpen(false);
       }
     };
     window.addEventListener('click', handleOutsideClick);
@@ -671,6 +675,22 @@ export function ViewerApp() {
     });
   };
 
+  // Zoom tạm thời độc lập cho khung bản gốc (trái): Ctrl + Wheel
+  useEffect(() => {
+    const left = leftPaneRef.current;
+    if (!left) return;
+
+    const onLeftPaneWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        setLeftZoomFactor((prev) => applyZoomStep(prev, e.deltaY));
+      }
+    };
+
+    left.addEventListener('wheel', onLeftPaneWheel, { passive: false });
+    return () => left.removeEventListener('wheel', onLeftPaneWheel);
+  }, [viewMode]);
+
   // Intelligent Reading Column Coordinator & Ceiling-Lock:
   // Điều phối cuộn thông minh cho khung đọc bản dịch:
   // 1. Phân biệt chính xác "vùng đen": Chỉ khoảng trống 2 bên sườn (lề trái/phải) mới lướt tự do ngoài khung.
@@ -684,6 +704,13 @@ export function ViewerApp() {
     if (!right) return;
 
     const onRightPaneWheel = (e: WheelEvent) => {
+      // Zoom tạm thời độc lập cho khung dịch (phải): Ctrl + Wheel
+      if (e.ctrlKey) {
+        e.preventDefault();
+        setRightZoomFactor((prev) => applyZoomStep(prev, e.deltaY));
+        return;
+      }
+
       // Bỏ qua nếu không có chuyển động cuộn trục Y
       if (!e.deltaY) return;
 
@@ -1126,14 +1153,8 @@ export function ViewerApp() {
               class="lt-btn"
               onClick={() => {
                 setSplitRatio(0.5);
-                if (zoomMode === 'fit') {
-                  setTimeout(() => {
-                    const ls = calculatePaneFitScale(leftPaneRef.current);
-                    const rs = calculatePaneFitScale(rightPaneRef.current);
-                    setLeftFitScale(ls);
-                    setRightFitScale(rs);
-                  }, 50);
-                }
+                setLeftZoomFactor(1.0);
+                setRightZoomFactor(1.0);
               }}
               title="Đặt lại tỉ lệ chia đều 50:50"
             >
@@ -1151,7 +1172,6 @@ export function ViewerApp() {
               class="lt-btn lt-dropdown-btn lt-mode-select-btn"
               onClick={() => {
                 setIsModeMenuOpen(!isModeMenuOpen);
-                setIsZoomMenuOpen(false);
               }}
               title="Chọn chế độ hiển thị bản dịch"
             >
@@ -1266,74 +1286,8 @@ export function ViewerApp() {
           </div>
         </div>
 
-        {/* RIGHT: Zoom, Actions, Settings */}
+        {/* RIGHT: Actions, Settings */}
         <div class="lt-toolbar-group">
-          {/* Zoom */}
-          <button
-            class="lt-btn"
-            title="Thu nhỏ"
-            onClick={() => {
-              setZoomMode('custom');
-              setScale((s) => Math.max(0.5, Math.round((s - 0.15) * 100) / 100));
-            }}
-          >
-            −
-          </button>
-          <div class="lt-dropdown-container">
-            <button
-              class="lt-btn lt-dropdown-btn"
-              onClick={() => {
-                setIsZoomMenuOpen(!isZoomMenuOpen);
-                setIsModeMenuOpen(false);
-              }}
-              title="Chọn mức thu phóng"
-            >
-              <span>{zoomMode === 'fit' ? 'Fit Width' : `${Math.round(scale * 100)}%`}</span>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                <polyline points="6 9 12 15 18 9"/>
-              </svg>
-            </button>
-            {isZoomMenuOpen && (
-              <div class="lt-dropdown-menu lt-zoom-menu" onClick={() => setIsZoomMenuOpen(false)}>
-                <div
-                  class={`lt-dropdown-item ${zoomMode === 'fit' ? 'active' : ''}`}
-                  onClick={() => {
-                    setZoomMode('fit');
-                    const ls = calculatePaneFitScale(leftPaneRef.current);
-                    const rs = calculatePaneFitScale(rightPaneRef.current);
-                    setLeftFitScale(ls);
-                    setRightFitScale(rs);
-                  }}
-                >
-                  <div class="lt-dropdown-item-title"><strong>Fit Width</strong></div>
-                  <div class="lt-dropdown-item-desc">Tự động vừa vặn khung đọc</div>
-                </div>
-                {[0.75, 0.9, 1.0, 1.15, 1.25, 1.5, 2.0].map((val) => (
-                  <div
-                    key={val}
-                    class={`lt-dropdown-item ${zoomMode === 'custom' && Math.abs(scale - val) < 0.02 ? 'active' : ''}`}
-                    onClick={() => {
-                      setZoomMode('custom');
-                      setScale(val);
-                    }}
-                  >
-                    <div class="lt-dropdown-item-title"><strong>{Math.round(val * 100)}%</strong></div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <button
-            class="lt-btn"
-            title="Phóng to"
-            onClick={() => {
-              setZoomMode('custom');
-              setScale((s) => Math.min(2.5, Math.round((s + 0.15) * 100) / 100));
-            }}
-          >
-            +
-          </button>
-
           <button
             class="lt-btn"
             onClick={retranslateAll}
@@ -1810,6 +1764,8 @@ export function ViewerApp() {
                 e.preventDefault();
                 isDraggingSplitter.current = true;
                 document.body.classList.add('lt-resizing');
+                setLeftZoomFactor(1.0);
+                setRightZoomFactor(1.0);
                 const target = e.currentTarget as Element;
                 try {
                   target.setPointerCapture?.(e.pointerId);
@@ -1848,14 +1804,10 @@ export function ViewerApp() {
                   window.removeEventListener('pointermove', onPointerMove);
                   window.removeEventListener('pointerup', onPointerUp);
 
-                  // Chỉ commit và tính lại scale một lần duy nhất khi nhả chuột
+                  // Reset tỷ lệ phóng và cập nhật tỷ lệ chia Splitter mới
+                  setLeftZoomFactor(1.0);
+                  setRightZoomFactor(1.0);
                   setSplitRatio(currentRatio);
-                  if (zoomMode === 'fit') {
-                    const ls = calculatePaneFitScale(leftPaneRef.current);
-                    const rs = calculatePaneFitScale(rightPaneRef.current);
-                    setLeftFitScale(ls);
-                    setRightFitScale(rs);
-                  }
                 };
 
                 window.addEventListener('pointermove', onPointerMove);

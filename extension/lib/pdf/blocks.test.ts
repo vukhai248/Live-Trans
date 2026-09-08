@@ -483,13 +483,122 @@ describe('PDF text blocks extractor', () => {
     const fig2 = figures.find((f) => f.figNum === 2);
     expect(fig2).toBeDefined();
     expect(fig2!.bbox[0]).toBe(45); // Left col x
-    expect(fig2!.bbox[1]).toBe(60); // colTop (clears running header)
+    expect(fig2!.bbox[1]).toBeLessThanOrEqual(60); // colTop (clears running header)
     expect(fig2!.bbox[3]).toBeGreaterThan(60); // figHeight
 
 
     const fig3 = figures.find((f) => f.figNum === 3);
     expect(fig3).toBeDefined();
     expect(fig3!.bbox[0]).toBeGreaterThanOrEqual(300); // Right col x
+  });
+
+  it('extractPageFigures detects Page 1 column figure without clipping authors (2302.07121 pattern)', () => {
+    const rawItems: RawTextItem[] = [
+      // Title
+      {
+        str: 'Universal Guidance for Diffusion Models',
+        transform: [14, 0, 0, 14, 172, 700],
+        width: 250,
+        height: 14,
+        fontName: 'Times-Bold',
+      },
+      // Authors in col 2
+      {
+        str: 'Jonas Geiping, Tom Goldstein',
+        transform: [10, 0, 0, 10, 310, 640], // top = 792 - 640 - 10 = 142, bottom = 152
+        width: 150,
+        height: 10,
+      },
+      // Figure 1 caption in col 2
+      {
+        str: 'Figure 1: Diffusion guided by off-the-shelf networks.',
+        transform: [10, 0, 0, 10, 318, 100], // top = 792 - 100 - 10 = 682
+        width: 220,
+        height: 10,
+        fontName: 'Times-Bold',
+      },
+    ];
+
+    const blocks = extractTextBlocks(rawItems, 612, 792, 1);
+    const figures = extractPageFigures(blocks, 612, 1);
+
+    expect(figures).toHaveLength(1);
+    const fig1 = figures[0]!;
+    expect(fig1.figNum).toBe(1);
+    expect(fig1.bbox[0]).toBeGreaterThanOrEqual(300); // Col 2
+    expect(fig1.bbox[1]).toBeGreaterThanOrEqual(150); // Starts below author
+    expect(fig1.bbox[2]).toBeLessThanOrEqual(260); // Column width
+    expect(fig1.bbox[3]).toBeGreaterThan(400); // Tall banner
+  });
+
+  it('extractPageFigures detects Page 1 full-width figure spanning entire width (2405.14101 pattern)', () => {
+    const rawItems: RawTextItem[] = [
+      // Title
+      {
+        str: 'Enhancing Image Layout Control with Loss-Guided Diffusion Models',
+        transform: [16, 0, 0, 16, 100, 700], // top = 76, bottom = 92
+        width: 400,
+        height: 16,
+        fontName: 'Times-Bold',
+      },
+      // Authors and Date
+      {
+        str: 'Zakaria Patel, Kirill Serkh - September 18, 2024',
+        transform: [10, 0, 0, 10, 150, 620], // top = 162, bottom = 172
+        width: 300,
+        height: 10,
+      },
+      // Full-width Figure 1 caption (spanning > 55% width)
+      {
+        str: 'Figure 1: Injection loss guidance (iLGD) uses attention injection across whole layout.',
+        transform: [10, 0, 0, 10, 90, 350], // top = 432
+        width: 430, // 430 / 612 = 70% width
+        height: 10,
+        fontName: 'Times-Bold',
+      },
+    ];
+
+    const blocks = extractTextBlocks(rawItems, 612, 792, 1);
+    const figures = extractPageFigures(blocks, 612, 1);
+
+    expect(figures).toHaveLength(1);
+    const fig1 = figures[0]!;
+    expect(fig1.figNum).toBe(1);
+    expect(fig1.bbox[0]).toBe(45); // Full width left margin
+    expect(fig1.bbox[1]).toBeGreaterThanOrEqual(175); // Below authors/date header
+    expect(fig1.bbox[2]).toBeGreaterThanOrEqual(500); // Full width > 500px
+    expect(fig1.bbox[3]).toBeGreaterThan(200); // Height to caption
+  });
+
+  it('extractPageFigures detects top-of-page figure in single-column paper without clipping (Page 9 Figure 4 pattern)', () => {
+    const rawItems: RawTextItem[] = [
+      // Centered Figure 4 caption
+      {
+        str: 'Figure 4: A graphical depiction of injection loss guidance (iLGD).',
+        transform: [10, 0, 0, 10, 152, 430], // top = 792 - 430 - 10 = 352
+        width: 316,
+        height: 10,
+        fontName: 'Times-Bold',
+      },
+      // Subsequent single-column paragraph
+      {
+        str: '(iLGD). Instead of delegating the layout generation task entirely to loss guidance, we rely on injection to first bias the latent representation.',
+        transform: [10, 0, 0, 10, 86, 380], // top = 792 - 380 - 10 = 402
+        width: 446,
+        height: 10,
+      },
+    ];
+
+    const blocks = extractTextBlocks(rawItems, 612, 792, 9);
+    const figures = extractPageFigures(blocks, 612, 9);
+
+    expect(figures).toHaveLength(1);
+    const fig4 = figures[0]!;
+    expect(fig4.figNum).toBe(4);
+    expect(fig4.bbox[0]).toBe(45); // Full width left margin
+    expect(fig4.bbox[1]).toBeLessThanOrEqual(55); // Clears top header area properly (does not clip z_t-1 ball)
+    expect(fig4.bbox[2]).toBeGreaterThanOrEqual(500); // Full width > 500px (not clipped to 260px column)
+    expect(fig4.bbox[3]).toBeGreaterThan(280); // Height from top to caption
   });
 });
 

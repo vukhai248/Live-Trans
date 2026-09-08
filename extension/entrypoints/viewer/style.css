@@ -1428,11 +1428,6 @@ body.lt-resizing .lt-splitter-bar {
   animation: lt-fadeIn 0.15s ease;
 }
 
-.lt-zoom-menu {
-  min-width: 140px;
-  right: 0;
-  left: auto;
-}
 
 .lt-dropdown-item {
   padding: 8px 10px;
@@ -1629,15 +1624,19 @@ body.lt-resizing .lt-splitter-bar {
 }
 
 .lt-vision-display-eq {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   margin: 18px 0;
   padding: 12px 16px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   overflow-x: auto;
+  text-align: center;
+}
+
+.lt-vision-display-eq .katex-display {
+  width: 100%;
+  margin: 0 !important;
 }
 
 .lt-vision-blockquote {

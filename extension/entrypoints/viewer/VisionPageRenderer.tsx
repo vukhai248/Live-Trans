@@ -9,6 +9,7 @@ import {
   type MarkdownTable,
   type TableAlign,
 } from '@/lib/pdf/md-table';
+import { normalizeEquationLatex } from '@/lib/pdf/latex-cleaner';
 import { PdfSnippet } from './PdfSnippet';
 
 export interface VisionPageRendererProps {
@@ -441,19 +442,20 @@ function VisionFigureCard({
 
 function VisionDisplayEquation({ latex }: { latex: string }) {
   const ref = useRef<HTMLDivElement>(null);
+  const cleanLatex = normalizeEquationLatex(latex);
 
   useEffect(() => {
     if (!ref.current) return;
     try {
-      katex.render(latex, ref.current, {
+      katex.render(cleanLatex, ref.current, {
         displayMode: true,
         throwOnError: false,
         strict: false,
       });
     } catch {
-      if (ref.current) ref.current.textContent = `$$${latex}$$`;
+      if (ref.current) ref.current.textContent = `$$${cleanLatex}$$`;
     }
-  }, [latex]);
+  }, [cleanLatex]);
 
   return <div ref={ref} class="lt-vision-display-eq" />;
 }
@@ -768,7 +770,7 @@ function parseMarkdownIntoBlocks(text: string): ParsedBlock[] {
       flushFigure();
       flushList();
       flushAlgorithm();
-      blocks.push({ type: 'equation', content: line.slice(2, -2).trim() });
+      blocks.push({ type: 'equation', content: normalizeEquationLatex(line.slice(2, -2).trim()) });
       continue;
     }
     if (line.startsWith('$$')) {
@@ -783,7 +785,7 @@ function parseMarkdownIntoBlocks(text: string): ParsedBlock[] {
     if (inEq) {
       if (line.endsWith('$$')) {
         eqBuffer.push(line.slice(0, -2));
-        blocks.push({ type: 'equation', content: eqBuffer.join('\n').trim() });
+        blocks.push({ type: 'equation', content: normalizeEquationLatex(eqBuffer.join('\n').trim()) });
         inEq = false;
         eqBuffer = [];
       } else {

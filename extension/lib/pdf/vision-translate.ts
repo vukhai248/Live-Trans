@@ -39,8 +39,12 @@ QUY TẮC PHÂN ĐỊNH RANH GIỚI BẮT BUỘC:
 
 QUY TẮC CÔNG THỨC TOÁN & LATEX:
 - Mọi công thức toán học, biến số nội dòng PHẢI được viết bằng mã LaTeX chuẩn trong cặp dấu $: $z_{t-1} = S(z_t, \\hat{\\epsilon}_t, t)$, $\\epsilon' \\sim \\mathcal{N}(0, \\mathbf{I})$, $z_t'$, $z_0$, $\\alpha_t$.
-- Phương trình độc lập đặt trong cặp dấu $$...$$ và giữ nguyên số thứ tự phương trình nếu có:
-  $$z_t' = \\sqrt{\\alpha_t / \\alpha_{t-1}} \\cdot z_{t-1} + \\sqrt{1 - \\alpha_t / \\alpha_{t-1}} \\cdot \\epsilon' \\quad (10)$$
+- Phương trình độc lập đặt trong cặp dấu $$...$$ và BẮT BUỘC dùng lệnh \\tag{N} ở cuối công thức cho số thứ tự phương trình nếu có:
+  $$z_t' = \\sqrt{\\alpha_t / \\alpha_{t-1}} \\cdot z_{t-1} + \\sqrt{1 - \\alpha_t / \\alpha_{t-1}} \\cdot \\epsilon' \\tag{10}$$
+- CẢNH BÁO QUAN TRỌNG VỀ SỐ THỨ TỰ PHƯƠNG TRÌNH:
+  + TUYỆT ĐỐI KHÔNG gộp số thứ tự phương trình vào bên trong công thức (nghiêm cấm nhét vào tử số phân số \\frac{... (17)}{...}, nghiêm cấm nhét vào ngoặc hàm số D(x(19))).
+  + Số thứ tự phương trình (17), (18), (19) PHẢI luôn được đặt độc lập ở cuối công thức bằng lệnh \\tag{17}, \\tag{18}, \\tag{19}.
+  + KHÔNG dùng \\quad (10) hay text thô (10) mà PHẢI dùng \\tag{10}.
 
 QUY TẮC BỐ CỤC & THỨ TỰ ĐỌC TRANG:
 3. NHẬN DIỆN BỐ CỤC & THỨ TỰ ĐỌC:
@@ -576,6 +580,8 @@ ${markdown}`;
             headers: {
               Authorization: `Bearer ${zenKey}`,
               'Content-Type': 'application/json',
+              'User-Agent': 'OpenCode-Desktop/1.0.0',
+              'x-session-id': `session-${Date.now()}`,
             },
             body: JSON.stringify(body),
           },

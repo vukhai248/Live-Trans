@@ -865,6 +865,46 @@ export function extractPageFigures(
     else col0.push(b);
   }
 
+  // Detect single-column vs multi-column page layout
+  const isSingleColumnPage =
+    col2.length === 0 ||
+    blocks.filter((b) => b.text.length > 80 && b.bbox[2] > viewportWidth * 0.55).length >= 2;
+
+  // Header / Title / Author clearance: ensure we never capture header, title or authors
+  const headerBlocks = blocks.filter((item) => item.bbox[1] < 60);
+  const headerBottom =
+    headerBlocks.length > 0
+      ? Math.max(...headerBlocks.map((item) => item.bbox[1] + item.bbox[3]))
+      : 45;
+
+  // On page 1, determine the bottom of title/author/date header
+  let page1HeaderBottom = 175;
+  if (pageNumber === 1) {
+    const p1HeaderItems = blocks.filter(
+      (item) =>
+        item.bbox[1] < 200 &&
+        (item.componentType === 'title' ||
+          item.componentType === 'authors' ||
+          item.bbox[1] + item.bbox[3] < 185),
+    );
+    if (p1HeaderItems.length > 0) {
+      page1HeaderBottom =
+        Math.max(...p1HeaderItems.map((item) => item.bbox[1] + item.bbox[3])) + 6;
+    }
+  }
+
+  const baseColTop = Math.max(48, headerBottom + 4);
+  let p1Col2Top = 0;
+  if (pageNumber === 1) {
+    const col2Header = col2.filter(
+      (item) => item.bbox[1] < 180 && item.componentType === 'authors',
+    );
+    p1Col2Top =
+      col2Header.length > 0
+        ? Math.max(...col2Header.map((item) => item.bbox[1] + item.bbox[3])) + 6
+        : Math.max(165, page1HeaderBottom);
+  }
+
   const checkColumn = (colBlocks: TextBlock[]) => {
     for (let idx = 0; idx < colBlocks.length; idx++) {
       const b = colBlocks[idx]!;
@@ -876,49 +916,60 @@ export function extractPageFigures(
 
       const numMatch = b.text.trim().match(/^(?:figure|fig\.|hình|table|bảng)\s*(\d+)/i);
       const figNum = numMatch ? parseInt(numMatch[1]!, 10) : undefined;
-
       const captionBbox = b.bbox;
-      // Header clearance: ensure we never capture the running header or author line
-      const headerBlocks = blocks.filter((item) => item.bbox[1] < 60);
-      const headerBottom =
-        headerBlocks.length > 0
-          ? Math.max(...headerBlocks.map((item) => item.bbox[1] + item.bbox[3]))
-          : 45;
-      const colTop = pageNumber === 1 ? 175 : Math.max(60, headerBottom + 10);
 
+      // Determine column top
+      let colTop = baseColTop;
+      if (pageNumber === 1) {
+        colTop = b.col === 2 ? p1Col2Top : Math.max(175, page1HeaderBottom);
+      }
 
-      // Check if all preceding blocks in this column are non-body (e.g. sub-labels)
-      const isTopFigure = colBlocks
+      // Filter out sub-labels inside the figure (e.g. text length < 160 and not heading)
+      const bodyPreceding = colBlocks
         .slice(0, idx)
-        .every((prior) => !prior.isHeading && prior.text.length < 160);
-
-      const prevBlock = idx > 0 ? colBlocks[idx - 1] : null;
+        .filter(
+          (prior) =>
+            prior.isHeading ||
+            prior.text.length >= 160 ||
+            (prior.componentType === 'paragraph' && prior.bbox[1] < colTop),
+        );
 
       let figTop = colTop;
-      if (!isTopFigure && prevBlock) {
-        figTop = Math.max(colTop, prevBlock.bbox[1] + prevBlock.bbox[3] + 4);
+      if (bodyPreceding.length > 0) {
+        const lastBody = bodyPreceding[bodyPreceding.length - 1]!;
+        figTop = Math.max(colTop, lastBody.bbox[1] + lastBody.bbox[3] + 4);
       }
+
+      // Figure spanning layout detection:
+      // 1. If page is single-column, every figure spans full body width.
+      // 2. If caption spans across the column divider or is centered, it's full-width.
+      // 3. If caption width > 52% of viewport width.
+      const captionCenterX = b.bbox[0] + b.bbox[2] / 2;
+      const isSpanningGutter =
+        b.bbox[0] < viewportWidth * 0.45 && b.bbox[0] + b.bbox[2] > viewportWidth * 0.55;
+      const isCentered = Math.abs(captionCenterX - viewportWidth / 2) < 50 && b.bbox[2] > 180;
+
+      const isFullWidth =
+        isSingleColumnPage ||
+        b.col === 0 ||
+        isSpanningGutter ||
+        isCentered ||
+        b.bbox[2] > viewportWidth * 0.52 ||
+        (b.bbox[0] < 150 && b.bbox[0] + b.bbox[2] > viewportWidth * 0.7);
 
       let figLeft: number;
       let figWidth: number;
 
-
-      if (b.col === 1) {
-        figLeft = 45;
-        figWidth = Math.max(220, Math.min(260, viewportWidth * 0.45));
-      } else if (b.col === 2) {
-        figLeft = Math.max(300, viewportWidth * 0.5);
-        figWidth = Math.max(220, Math.min(260, viewportWidth * 0.45));
-      } else {
+      if (isFullWidth) {
         figLeft = 45;
         figWidth = Math.max(viewportWidth - 90, 500);
-      }
-
-      // Special case for Page 1 where Figure 1 is a tall banner in Column 2
-      if (pageNumber === 1 && (figNum === 1 || !figNum)) {
-        figLeft = 307;
-        figTop = 165;
-        figWidth = 245;
+      } else if (b.col === 1) {
+        figLeft = 45;
+        figWidth = Math.max(220, Math.min(260, viewportWidth * 0.45));
+      } else {
+        // col 2
+        figLeft = Math.max(300, viewportWidth * 0.5);
+        figWidth = Math.max(220, Math.min(260, viewportWidth * 0.45));
       }
 
       const figHeight = Math.max(60, captionBbox[1] - 4 - figTop);

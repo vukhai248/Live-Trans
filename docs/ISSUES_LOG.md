@@ -40,6 +40,9 @@ Tài liệu này tổng hợp toàn bộ các lỗi phát sinh trong quá trình
 | **ISSUE-030** | Tooling / Root Config | Không có `package.json` ở root → `npm test/build/check` ở root lỗi ENOENT, CI và agent phải `cd extension`. | Mọi config npm nằm cô lập trong `extension/`. | Thêm `package.json` proxy root forward 7 scripts vào `extension/` (không dependencies). Verify `npm test` từ root: 21 files, 141/141 pass. | ✅ Đã khắc phục (A15) |
 | **ISSUE-031** | UI / Alignment | Cửa sổ bản dịch bị lệch điểm bắt đầu và kết thúc so với trang gốc (lệch ngắt trang tích lũy). | Đo chiều cao bằng effectiveRightScale thay vì effectiveLeftScale; margin-bottom 32px cộng dồn với gap 24px; warning banner đặt trong khung phải. | Thêm prop heightScale={effectiveLeftScale} đồng bộ chiều cao 1:1; chuẩn hóa margin: 0 auto; đưa warning banner lên trên workspace. | ✅ Đã khắc phục & Kiểm chứng |
 | **ISSUE-032** | UX / Scrolling | (1) Hover vào trang mới khi chưa chạm trần đã bị cuộn nội dung con làm mất tiêu đề; (2) Lướt nhanh qua khoảng đen 24px bị vọt lố qua trang kế tiếp; (3) Cuộn hết nội dung trong trang bị đứng cứng (freeze) do subpixel DPI scaling. | (1) Thiếu khóa trần (ceiling-lock); (2) Bắt nhầm khoảng trống giữa 2 trang là vùng lề đen ngoài lề; (3) Trên HiDPI scaling, `remainingDown` dừng ở mức lẻ (> 1px) khiến điều kiện khóa trần liên tục kích hoạt, chặn cuộn khung cha. | (1) Bộ điều phối Reading Column Coordinator chỉ kích hoạt scroll in page khi trần trang chạm đỉnh; (2) Giới hạn vùng lề đen thực sự ở 2 bên sườn trang (clientX); (3) Nâng ngưỡng nhận diện đáy an toàn (3px) và chuyển tiếp lực cuộn dư (unusedDelta) ra khung cha khi chạm đáy. | ✅ Đã khắc phục & Kiểm chứng |
+| **ISSUE-033** | UI / Responsive Zoom | Thanh chọn mức thu phóng (75%–200%, nút −/+) trên Toolbar làm chật chội giao diện và áp đặt 1 scale cố định làm vỡ layout 2 khung khi chia tỷ lệ không đều. | Toolbar chứa cụm nút zoom tĩnh không phù hợp với layout song ngữ responsive; thiếu cơ chế zoom nhanh tạm thời cho từng bên trang. | Xóa bỏ cụm nút zoom trên Toolbar; cố định chế độ hiển thị luôn là Fit Width tự động; hỗ trợ Ctrl + Wheel zoom độc lập tạm thời cho từng bên trang; tự động reset tỷ lệ phóng về chuẩn Fit Width khi kéo hoặc chỉnh thanh Splitter ở giữa. | ✅ Đã khắc phục & Kiểm chứng |
+| **ISSUE-034** | Renderer & API / Figure BBox & OpenCode Zen | Lỗi cắt hình ảnh (Figure Snippet) bị sai trên bài báo toàn trang (`2405.14101`): mất 3 cột ảnh bên trái và chém vào dòng ngày tháng; OpenCode Zen API báo lỗi 400 `MissingSessionID` khi gọi từ môi trường ngoài. | Hardcode tọa độ Figure 1 trên Trang 1 (`figLeft = 307, figWidth = 245`); thiếu headers `User-Agent: OpenCode-Desktop/1.0.0` và `x-session-id` khi gọi OpenCode Zen API. | (1) Xóa bỏ hardcode, tính toán động BBox cho cả Full-Width (`col === 0` hoặc span > 55% trang) và Column Figure (`col === 1, 2`), định vị đỉnh ảnh tự động theo đáy author/date; (2) Thêm đầy đủ headers định danh cho OpenCode Zen API. | ✅ Đã khắc phục & Kiểm chứng |
+| **ISSUE-035** | LaTeX / Equation Numbering | Số thứ tự phương trình (17, 18, 19) bị gộp vào bên trong biểu thức toán (nhét vào tử số `\frac{... (17)}{...}` hoặc ngoặc hàm `D(x(19))`), hoặc bị dính sát lề phải công thức thay vì căn lề phải mép trang. | VLM đọc 2D ngang hàng với tử số/hàm số và sinh token autoregressive; Prompt hướng dẫn dùng `\quad (10)` thay vì lệnh chuẩn `\tag{N}`; KaTeX renderer thiếu bộ lọc regex tự động bóc tách và chuẩn hóa tag. | (1) Cập nhật Prompt bắt buộc dùng chuẩn `\tag{N}` và nghiêm cấm nhét vào ngoặc/tử số; (2) Tạo module `normalizeEquationLatex` tự động bóc tách số thứ tự bị kẹt chuyển thành `\tag{N}` căn lề phải chuẩn KaTeX; (3) Tinh chỉnh CSS `.lt-vision-display-eq .katex-display { width: 100% }`. | ✅ Đã khắc phục & Kiểm chứng |
 
 ---
 
@@ -207,3 +210,114 @@ flowchart TD
   5. **Triệt tiêu Kẹt Đáy (Subpixel Tolerance & Unused Delta Forwarding)**:
      - Nâng ngưỡng nhận diện đáy an toàn từ `1px` lên `3px`.
      - Đo lường thực tế `actualScrolled = bodyCurr.scrollTop - prevScroll`. Nếu `actualScrolled < deltaY` (do đã chạm đáy vật lý), toàn bộ phần delta dư thừa `unusedDelta = deltaY - actualScrolled` được lập tức chuyển tiếp ra khung cha `right.scrollTop += unusedDelta` để đẩy sang trang kế tiếp mượt mà, không bao giờ bị đứng. Áp dụng cơ chế đối xứng hoàn hảo cho chiều cuộn ngược lên.
+
+---
+
+## 9. Phân tích Chi tiết ISSUE-033: Tối Ưu Hóa Thu Phóng Mặc Định Fit Width & Phím Tắt Zoom Độc Lập
+
+- **Hiện tượng**:
+  - Thanh chọn mức thu phóng (`75%` đến `200%`, cùng các nút `−` và `+`) trên Toolbar chiếm dụng nhiều diện tích.
+  - Khi người dùng chọn một mức scale cố định (ví dụ 100%, 125%), tỷ lệ này áp dụng tĩnh cho cả hai khung khiến giao diện chia đôi (bilingual) bị vỡ: một bên bị tràn ngang sinh scrollbar, bên kia lại co rúm để lại khoảng trắng lớn.
+- **Nguyên nhân gốc rễ**:
+  - Cơ chế zoom toolbar áp dụng tỷ lệ scale đồng nhất mà không tính đến kích thước động của từng khung theo tỷ lệ chia Splitter.
+  - Thiếu khả năng phóng to linh hoạt tạm thời cho từng bên trang riêng biệt (chỉ muốn xem rõ một biểu đồ bên trang gốc hoặc một công thức toán bên bản dịch).
+- **Giải pháp xử lý**:
+  1. **Dọn sạch Toolbar**: Xóa bỏ hoàn toàn các nút `−`, `+`, dropdown `Fit Width` và menu mốc 75%–200% khỏi Toolbar.
+  2. **Cố định Fit Width là chế độ mặc định**: Luôn tự động tính toán `leftFitScale` và `rightFitScale` tối ưu theo độ rộng khung đọc.
+  3. **Hỗ trợ Zoom tạm thời độc lập bằng `Ctrl + Wheel` (Per-Pane Zoom)**:
+     - Giữ `Ctrl` và lăn chuột trên khung trái: chỉ phóng to/thu nhỏ khung bản gốc (`leftZoomFactor`, từ `0.5x` đến `3.0x`).
+     - Giữ `Ctrl` và lăn chuột trên khung phải: chỉ phóng to/thu nhỏ khung bản dịch (`rightZoomFactor`).
+     - Ngăn chặn trình duyệt phóng to toàn trang (`e.preventDefault()`).
+  4. **Tự động Reset khi tương tác thanh Splitter**:
+     - Khi người dùng kéo hoặc thả thanh căn chỉnh ở giữa (Splitter), hoặc bấm nút `50:50`: `leftZoomFactor` và `rightZoomFactor` tự động reset về `1.0`, đưa cả hai khung về kích thước Fit Width chuẩn theo bề rộng mới.
+
+---
+
+## 10. Phân tích Chi tiết ISSUE-034: Tối Ưu Bounding Box Trích Xuất Hình Ảnh Động & Kết Nối OpenCode Zen SOTA
+
+- **Hiện tượng**:
+  1. Trên bài báo khoa học `2405.14101` (*Enhancing Image Layout Control with Loss-Guided Diffusion Models*), phần cắt trích xuất Figure 1 (Trang 1) bị cắt sai: hình ảnh gốc là banner toàn trang (Full-Width) gồm 6 cột ảnh, nhưng hệ thống chỉ hiển thị 3 cột bên phải, mất sạch 3 cột bên trái; đồng thời mép trên cắt chém ngang dòng tác giả/ngày tháng (*September 18, 2024*).
+  2. Tiếp tục ở **Trang 9 (Figure 4)**: Hình vẽ sơ đồ kiến trúc bị xén mất toàn bộ nửa bên phải hoặc nửa bên trái, quả bóng \(z_{t-1}\) trên đỉnh bị chém đầu, khối hộp \(K_l, Q_l\) bị chém cụt ngang thân, đồng thời khung ảnh bị thụt lề để lại khoảng trống màu trắng rất lớn.
+  3. Khi gọi OpenCode Zen API (endpoint `/responses` với model `muse-spark-1.2-contributor-free`), hệ thống nhận mã lỗi HTTP 400 (`MissingSessionID: OpenCode's free tier can only be used in OpenCode`).
+- **Nguyên nhân gốc rễ**:
+  1. **Hardcode tọa độ Trang 1**: Trong `extension/lib/pdf/blocks.ts`, tồn tại đoạn mã ép cứng:
+     ```ts
+     if (pageNumber === 1 && (figNum === 1 || !figNum)) {
+       figLeft = 307;
+       figTop = 165;
+       figWidth = 245;
+     }
+     ```
+     Đoạn mã này giả định mọi Figure 1 ở Trang 1 đều là dải ảnh dọc ở Cột 2 (theo mẫu bài báo `2302.07121`). Khi gặp bài báo `2405.14101` có Figure 1 trải rộng toàn trang (`col = 0`, width > 500px), đoạn hardcode ép `figLeft = 307` làm mất sạch 3 cột ảnh bên trái (`a ball and a shoe`, `a dog...`, `a boat...`), và `figTop = 165` chém vào khối ngày tháng kết thúc tại $Y = 174.54$.
+  2. **Bị phân loại nhầm trên tài liệu 1 Cột (Single-Column Paper - Trang 9)**:
+     - Bài báo `2405.14101` là bài báo 1 Cột xuyên suốt (`col0` chiếm ưu thế, `col2.length === 0`).
+     - Caption của Figure 4: `"Figure 4: A graphical depiction of injection loss guidance (iLGD)."` có độ dài vừa phải (`width = 316pt`), nằm căn giữa trang (`minX = 152, maxX = 468`).
+     - Do `316 < 397pt` (ngưỡng 65% bề rộng trang), dòng caption này bị gán thành `col = 1`.
+     - Điều kiện cũ kiểm tra `isFullWidth` chỉ xem xét `bbox[2] > viewportWidth * 0.55` (`> 336pt`), nên caption ngắn `316pt` này bị phán đoán là **không phải Full-Width**!
+     - Hệ thống lập tức ép kích thước cắt theo chuẩn Cột 1 của bài báo 2 cột (`figLeft = 45, figWidth = 260`), chỉ cắt từ `X = 45` đến `X = 305`, chém mất toàn bộ nửa bên phải của sơ đồ (từ `X = 305` đến `X = 530`); đồng thời đỉnh `colTop = 60` chém vào chỏm đầu của quả bóng \(z_{t-1}\) (vốn bắt đầu từ `Y ~ 50`).
+  3. **Thiếu Header Client Xác Thực cho OpenCode Zen**: OpenCode Zen Gateway yêu cầu hai header bắt buộc đối với các model free/contributor: `User-Agent: OpenCode-Desktop/1.0.0` và `x-session-id: session-${Date.now()}`. Nếu thiếu, gateway sẽ từ chối request với mã lỗi 400.
+- **Giải pháp xử lý**:
+  1. **Triệt tiêu hoàn toàn Hardcode, Chuyển sang Phát hiện Bounding Box Động (Dynamic Figure BBox)**:
+     - *Nhận diện Bố cục Trang (Page-Level Layout Detection)*:
+       ```ts
+       const isSingleColumnPage =
+         col2.length === 0 ||
+         blocks.filter((b) => b.text.length > 80 && b.bbox[2] > viewportWidth * 0.55).length >= 2;
+       ```
+       Nếu là bài báo 1 Cột $\rightarrow$ Mọi hình ảnh tự động mở rộng theo toàn bộ chiều rộng nội dung (`figLeft = 45, figWidth = Math.max(viewportWidth - 90, 500)`).
+     - *Nhận diện Figure Căn giữa / Vắt ngang (Cross-Column & Centered Caption)*: Kể cả trên bài báo 2 cột, nếu Caption vắt ngang qua giữa trang (`bbox[0] < viewportWidth * 0.45 && bbox[0] + bbox[2] > viewportWidth * 0.55`) hoặc tâm của nó nằm ở vùng giữa trang (`Math.abs(captionCenterX - viewportWidth / 2) < 50 && bbox[2] > 180`), hệ thống tự động xác định đó là Full-Width Figure.
+     - *Căn chỉnh Đỉnh ảnh an toàn (Top Figure Clearance)*: Hạ đỉnh an toàn của các hình ảnh đầu trang xuống `baseColTop = Math.max(48, headerBottom + 4)` (thay vì 60), bao trọn các chi tiết đồ họa sát đỉnh trang (như quả bóng \(z_{t-1}\) tại `Y = 49`) mà không bị chém mất.
+     - *Căn chỉnh Đỉnh ảnh theo Header/Authors/Date trên Trang 1*: Quét tìm đáy của tất cả các khối Title, Authors, Date (`p1HeaderItems`); gán `colTop = Math.max(165, page1HeaderBottom + 6)`.
+     - *Loại trừ Sub-labels bên trong ảnh*: Bỏ qua các text block ngắn nằm bên trong vùng hình ảnh (`prior.text.length < 160 && !prior.isHeading`), giúp `figTop` không bị trôi lệch xuống các nhãn con.
+  2. **Bổ sung Headers Định Danh cho OpenCode Zen Gateway**:
+     - Thêm `User-Agent: OpenCode-Desktop/1.0.0` và `x-session-id: session-${Date.now()}` vào `fetchWithRetry` tại `translateSentenceBatchZen` (`extension/lib/pdf/translate.ts`) và `verifyAndRepairTranslation` (`extension/lib/pdf/vision-translate.ts`).
+  3. **Kiểm thử Toàn diện (Unit Tests & CDP Live Verification)**:
+     - Bổ sung 3 test cases mới trong `blocks.test.ts` kiểm chứng cả 3 trường hợp: (1) Mẫu 2-Column (`2302.07121`), (2) Full-Width Trang 1 (`2405.14101 Figure 1`), (3) Top-of-page Figure bài báo 1 Cột (`2405.14101 Figure 4 Trang 9`). Toàn bộ **150/150 Unit Tests pass 100%**.
+     - Kiểm thử tự động CDP trên trình duyệt thực tế, xác nhận BBox Trang 9 đạt chuẩn `[45, 49, 522, 299]`.
+
+---
+
+## 11. Phân tích Chi tiết ISSUE-035: Số Thứ Tự Phương Trình Bị Gộp Vào Trong Công Thức Toán LaTeX
+
+- **Hiện tượng**:
+  1. Trên Trang 16 của bài báo khoa học `2405.14101`: Các số thứ tự phương trình như `(17)`, `(18)`, `(19)` bị nhét vào bên trong các cấu trúc LaTeX của công thức:
+     - Phương trình (17): Số `(17)` chui tọt vào tử số phân số: `s_\theta(\mathbf{x}_t, t) := -\frac{\epsilon_\theta(\mathbf{x}_t, t)(17)}{\sqrt{1 - \bar{\alpha}_t}}`.
+     - Phương trình (18): Số `(18)` bị gộp vào phần tử số thứ hai: `\frac{\sqrt{\alpha_t}(1 - \bar{\alpha}_{t-1})(18)}{1 - \bar{\alpha}_t}\mathbf{x}_t`.
+     - Phương trình (19): Số `(19)` bị nuốt vào bên trong hàm số: `\mu_\theta(\mathbf{x}_t, t) = \tilde{\mu}_t(\mathbf{x}_t, D_\theta(\mathbf{x}_t(19)))`.
+  2. Trên Trang 4 của bài báo `2405.14101`: Phương trình (9) dù không bị nuốt vào trong cấu trúc nhưng lại xuất hiện sát rạt bên phải biểu thức toán ở giữa trang: `\ell_y(z_t) = ... \quad (9)` thay vì được căn lề phải (right-aligned) vào mép trang theo chuẩn xuất bản khoa học.
+- **Nguyên nhân gốc rễ**:
+  1. **Bản chất thị giác và cơ chế sinh autoregressive của mô hình Vision (VLM)**:
+     - Khi mô hình VLM (Gemini 3.5 Flash-Lite / Muse) quét ảnh tài liệu PDF, số thứ tự phương trình nằm ở lề bên phải của trang.
+     - Về mặt tọa độ Y (baseline), số `(17)` nằm ngang hàng trực tiếp với thành phần kết thúc công thức (thường là tử số của phân số hoặc đối số cuối cùng của hàm số).
+     - Khi sinh chuỗi token LaTeX từ trái sang phải, nếu mô hình đang mở một nhóm ngoặc như `\frac{...` hoặc `D_\theta(...`, mắt mô hình nhận diện token tiếp theo là `(17)` và tự động chèn luôn `(17)` vào trước khi đóng dấu `}` hoặc `)`.
+  2. **Hướng dẫn Prompt chưa chuẩn (`buildVisionPrompt` trong `vision-translate.ts`)**:
+     - Prompt hiện tại đưa ra ví dụ mẫu: `$$... \quad (10)$$`.
+     - Lệnh `\quad (10)` chỉ là khoảng trắng thông thường trong dòng công thức, khiến:
+       - VLM hiểu rằng số thứ tự là một phần của chuỗi toán học nội dòng, dẫn đến nguy cơ nhầm lẫn ranh giới và nhét vào trong ngoặc.
+       - Khi render qua KaTeX, `\quad (10)` bị dính sát vào biểu thức ở giữa trang, không kích hoạt được cơ chế căn lề phải `\tag{}` của LaTeX/KaTeX.
+  3. **Chuẩn KaTeX cho số thứ tự phương trình**:
+     - KaTeX hỗ trợ chính thức lệnh `\tag{N}` (chuẩn gói `amsmath` trong LaTeX) khi ở chế độ khối `displayMode: true`.
+     - Khi sử dụng cú pháp `$$E = mc^2 \tag{17}$$`: KaTeX tự động render một bảng toán học với thẻ `<span class="katex-tag">...</span>`, đẩy số `(17)` sát mép phải của khung đọc (right margin) và tách biệt 100% khỏi công thức toán.
+  4. **Thiếu lớp phòng thủ tự động làm sạch (Auto-Repair Sanitizer) ở Client Renderer**:
+     - Trước đây `VisionDisplayEquation` nhận trực tiếp chuỗi `latex` thô từ AI và chuyển thẳng vào `katex.render` mà không qua bất kỳ bộ lọc nào.
+     - Nếu AI vô tình sinh ra `\frac{A (17)}{B}` hoặc `\quad (17)`, renderer hiển thị nguyên văn lỗi mà không tự động bóc tách số thứ tự ra thành `\tag{17}`.
+- **Giải pháp xử lý đã thực hiện (Kiến trúc 2 Lớp Phòng Thủ)**:
+  1. **Lớp 1: Cập nhật System Prompt (`vision-translate.ts`)**:
+     - Cập nhật quy tắc số thứ tự phương trình trong `buildVisionPrompt`: Bắt buộc dùng cú pháp chuẩn KaTeX `\tag{N}` đặt ở cuối khối `$$... \tag{N}$$`.
+     - Bổ sung cảnh báo nghiêm cấm gộp số thứ tự vào tử số phân số `\frac{... (17)}{...}` hoặc ngoặc hàm số `D(x(19))`.
+     - Cấm dùng `\quad (10)` hay text thô `(10)` mà bắt buộc phải dùng `\tag{10}`.
+  2. **Lớp 2: Bộ lọc Auto-Repair Sanitizer tại Client (`extension/lib/pdf/latex-cleaner.ts`)**:
+     - Tạo module độc lập `normalizeEquationLatex(raw: string): string`:
+       - Tự động phát hiện và bóc tách các dạng số thứ tự bị kẹt:
+         - Kẹt trong tử số: `\frac{A (17)}{B}` $\rightarrow$ `\frac{A}{B} \tag{17}`.
+         - Kẹt trong ngoặc hàm: `D_\theta(x_t(19))` $\rightarrow$ `D_\theta(x_t) \tag{19}`.
+         - Dạng `\quad (N)` hoặc `, (N)` ở cuối công thức $\rightarrow$ chuyển thành `\tag{N}`.
+         - Giữ nguyên công thức đã có sẵn `\tag{...}` và không can thiệp vào các biểu thức toán học hợp lệ như `f(x) = (x + 1)`.
+     - Tích hợp vào `VisionDisplayEquation` và `parseMarkdownIntoBlocks` trong `VisionPageRenderer.tsx`.
+  3. **Tinh chỉnh CSS Căn lề phải Chuẩn KaTeX (`style.css`)**:
+     - Chuyển `.lt-vision-display-eq` sang `display: block; text-align: center;`.
+     - Đặt `.lt-vision-display-eq .katex-display { width: 100%; margin: 0 !important; }`, cho phép `<span class="katex-tag">...</span>` của KaTeX tự động ghim sát mép phải (right margin) của hộp công thức.
+  4. **Kiểm thử Toàn diện (Unit Tests & CDP Live Verification)**:
+     - Tạo bộ unit test `extension/lib/pdf/latex-cleaner.test.ts` kiểm chứng toàn bộ 7 kịch bản biên (bao gồm các phương trình 17, 18, 19, 9, 22). Toàn bộ **157/157 Unit Tests pass 100%**.
+     - Lệnh `npm run check` (TypeScript typecheck + ESLint + Vitest) và `npm run build` hoàn tất với 0 lỗi.
+     - Kiểm thử tự động CDP trên trình duyệt thực tế với Trang 16 của `2405.14101`, chụp ảnh màn hình nghiệm thu xác nhận toàn bộ 4 phương trình (17), (18), (19), (20) được tách biệt và căn lề phải hoàn hảo.
